@@ -11,7 +11,7 @@ import SwiftUI
 struct Ambient_Health_InterfaceApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AmbientHealthObjectView()
             
             
             

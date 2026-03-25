@@ -1,155 +1,185 @@
 //
-//  ContentView.swift
+//  AmbientHealthObjectView.swift
 //  Ambient Health Interface
 //
-//  Created by Nathan Mcmillan on 3/23/26.
+//  Created by Nathan McMillan on 3/25/26.
 //
-
 
 import SwiftUI
 import Combine
-import HealthKit
-import HealthKitUI
 
+// MARK: - Ambient Color System (Mock Health States)
+enum ColorHealthState: String, CaseIterable, Identifiable {
+    case blue = "Blue"
+    case green = "Green"
+    case yellow = "Yellow"
+    case purple = "Purple"
+    case gray = "Gray"
+    case red = "Red"
+    case orange = "Orange"
 
-var alerts: [String] = ["Low Heart Rate", "Low Hydration",
-"High Stress", "Low Activity", "Low Health Score"]
+    var id: String { rawValue }
 
+    // MARK: Visual representation of each state
+    var color: Color {
+        switch self {
+        case .blue: return .blue
+        case .green: return .green
+        case .yellow: return .yellow
+        case .purple: return .purple
+        case .gray: return Color.gray.opacity(0.5)
+        case .red: return .red
+        case .orange: return .orange
+        }
+    }
 
-func GetHealthData(){
-    
-    
-    
-}
+    // MARK: Title for UI display
+    var title: String {
+        switch self {
+        case .blue: return "Recovered"
+        case .green: return "On Track"
+        case .yellow: return "Needs Movement"
+        case .purple: return "Stressed"
+        case .gray: return "Steady"
+        case .red: return "Warning"
+        case .orange: return "Fatigue Building"
+        }
+    }
 
-
-
-
-struct ContentView: View {
-    @State private var heartRate: Double = 0
-    @State private var hydration: Double = 0
-    @State private var stress: Double = 0
-    @State private var activity: Double = 0
-    @State private var healthScore: Double = 0
-    
-    @State private var waterInput: String = ""
-    
-    var body: some View {
-        ZStack {
-            // background
-            Color.blue.opacity(0.40)
-                .ignoresSafeArea()
-                .shadow(radius: 20)
-
-            VStack(spacing: 16) {
-                Image("HappyFace")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 200, height: 200)
-                    .shadow(radius: 20)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.green, lineWidth: 10)
-                    )
-                // Health Cluster
-                Form {
-                    Section(header: Text("Health Details")) {
-                        HStack(alignment: .center) {
-                            Spacer()
-
-                            //HeartRate
-                            Gauge(value: heartRate, in: 40...180) {
-                                Text("BPM")
-                            } currentValueLabel: {
-                                Text("\(Int(heartRate))")
-                            }
-                            .gaugeStyle(.accessoryCircular)
-                            .tint(.red)
-                            
-                            
-                            
-                            //Hydration Level
-                            Gauge(value: hydration, in: 0...100) {
-                                Text("H20")
-                            } currentValueLabel: {
-                                Text("\(Int(hydration))")
-                            }
-                            .gaugeStyle(.accessoryCircular)
-                            .tint(.blue)
-                            
-                            
-                            
-                            
-                            //Stress Gauge
-                            Gauge(value: stress, in: 0...100) {
-                                Text("Stress")
-                            } currentValueLabel: {
-                                Text("\(Int(stress))")
-                            }
-                            .gaugeStyle(.accessoryCircular)
-                            .tint(.purple)
-                            
-                            
-                            
-                            //Activity Gauge
-                            Gauge(value: activity, in: 0...100){
-                                Text("Activ")
-                            } currentValueLabel: {
-                                Text("\(Int(activity))")
-                            }
-                            .gaugeStyle(.accessoryCircular)
-                            .tint(.yellow)
-                            
-                            
-                            //Health Level
-                            Gauge(value: healthScore, in: 0...100){
-                                Text("Health")
-                            } currentValueLabel: {
-                                Text("\(Int(healthScore))")
-                            }
-                            .gaugeStyle(.accessoryCircular)
-                            .tint(.black)
-                            
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                   
-                    
-                    Section(header: Text("Health Alerts")) {
-                        if hydration < 50 {
-                            Text("Low Hydration. Drink more water!")
-                        }
-                        
-                    }
-                    
-                    Section(header: Text("Water")){
-                        VStack(alignment: .center){
-                            Text("How much water have you drank today?")
-                            TextField("Enter a number in cups", text: $waterInput)
-                                .textFieldStyle(.roundedBorder)
-                                .keyboardType(.numberPad)
-                                .onChange(of: waterInput) { oldValue, newValue in
-                                    if let cups = Double(newValue) {
-                                        // Convert cups to a 0-100 hydration percentage as an example mapping
-                                        hydration = min(100, max(0, cups / 8.0 * 100))
-                                    } else if newValue.isEmpty {
-                                        hydration = 0
-                                    }
-                                }
-                            
-                            
-                        }
-                    }
-                }
-            }
+    // MARK: Message / Explanation for UI
+    var message: String {
+        switch self {
+        case .blue:
+            return "You seem well-rested and your body is recovering normally."
+        case .green:
+            return "Your activity looks healthy and consistent right now."
+        case .yellow:
+            return "You have been still for a while. A short walk might help."
+        case .purple:
+            return "Your body may be under stress. This could be a good time to slow down."
+        case .gray:
+            return "Nothing unusual stands out right now. You look stable."
+        case .red:
+            return "Something looks off. Pay attention to how you feel and consider checking in."
+        case .orange:
+            return "Fatigue may be building. Rest and hydration could help."
         }
     }
 }
 
+// MARK: - *Simple* Simulated Health Data Layer
+final class HealthSimulator: ObservableObject {
+    // Current health state (mock)
+    @Published private(set) var currentState: ColorHealthState = .red
+    
+    // History of last states (mock)
+    @Published private(set) var history: [ColorHealthState] = [.gray, .green, .blue]
 
+    // MARK: Methods to update state
+    func setState(_ newState: ColorHealthState) {
+        currentState = newState
+        history.append(newState)
 
-#Preview {
-    ContentView()
+        if history.count > 7 { //ex. keep only the last 7 for history display
+            history.removeFirst()
+        }
+    }
+
+    // Simulate random state changes for testing
+    func simulateRandomChange() {
+        guard let newState = ColorHealthState.allCases.randomElement() else { return }
+        setState(newState)
+    }
 }
 
+// MARK: - Front-End Prototype View
+struct AmbientHealthObjectView: View {
+    @StateObject private var simulator = HealthSimulator()
+
+    var body: some View {
+        VStack(spacing: 28) {
+            
+            // MARK: Ambient Object - Lamp ("art")
+            RoundedRectangle(cornerRadius: 28)
+                .fill(simulator.currentState.color.gradient)
+                .frame(width: 220, height: 220)
+                .shadow(color: simulator.currentState.color.opacity(0.35), radius: 24)
+                .overlay {
+                    VStack(spacing: 8) {
+                        Text(simulator.currentState.rawValue)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
+
+                        Text(simulator.currentState.title)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.5), value: simulator.currentState)
+
+            // MARK: Current Status / Explanation
+            VStack(spacing: 8) {
+                Text("Current Status")
+                    .font(.headline)
+
+                Text(simulator.currentState.message)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
+
+            // MARK: Minimal History View (Mock)
+            VStack(spacing: 10) {
+                Text("Recent states")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach(Array(simulator.history.enumerated()), id: \.offset) { _, state in
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(state.color)
+                            .frame(width: 30, height: 30)
+                    }
+                }
+            }
+            
+            // MARK : Controls for Testing / Mock Interaction
+            VStack(spacing: 12) {
+                Text("Try a different state")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Menu {
+                    ForEach(ColorHealthState.allCases) { state in
+                        Button(state.rawValue) {
+                            simulator.setState(state)
+                        }
+                    }
+                } label: {
+                    Label("Choose Health State", systemImage: "waveform.path.ecg")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button("Simulate Random Change") {
+                    simulator.simulateRandomChange()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+            }
+            .padding(.horizontal)
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(Color(white: 0.96))
+        )
+        .padding()
+    }
+}
+
+// MARK: - Preview
+#Preview {
+    AmbientHealthObjectView()
+}
