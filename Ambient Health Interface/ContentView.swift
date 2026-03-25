@@ -16,32 +16,40 @@ var alerts: [String] = ["Low Heart Rate", "Low Hydration",
 "High Stress", "Low Activity", "Low Health Score"]
 
 
+func GetHealthData(){
+    
+    
+    
+}
+
 
 
 
 struct ContentView: View {
-    var Heartrate: Double = 0
-    var Hydration: Double = 0
-    var Stress: Double = 0
-    var Activity: Double = 0
-    var HealthScore: Double = 0
+    @State private var heartRate: Double = 0
+    @State private var hydration: Double = 0
+    @State private var stress: Double = 0
+    @State private var activity: Double = 0
+    @State private var healthScore: Double = 0
+    
+    @State private var waterInput: String = ""
     
     var body: some View {
         ZStack {
             // background
-            Color.yellow.opacity(0.15)
+            Color.blue.opacity(0.40)
                 .ignoresSafeArea()
                 .shadow(radius: 20)
 
             VStack(spacing: 16) {
-                Image("NeutralFace")
+                Image("HappyFace")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 200, height: 200)
                     .shadow(radius: 20)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white, lineWidth: 4)
+                            .stroke(Color.green, lineWidth: 10)
                     )
                 // Health Cluster
                 Form {
@@ -50,10 +58,10 @@ struct ContentView: View {
                             Spacer()
 
                             //HeartRate
-                            Gauge(value: Heartrate, in: 40...180) {
+                            Gauge(value: heartRate, in: 40...180) {
                                 Text("BPM")
                             } currentValueLabel: {
-                                Text(String(Heartrate))
+                                Text("\(Int(heartRate))")
                             }
                             .gaugeStyle(.accessoryCircular)
                             .tint(.red)
@@ -61,10 +69,10 @@ struct ContentView: View {
                             
                             
                             //Hydration Level
-                            Gauge(value: Hydration, in: 0...100) {
+                            Gauge(value: hydration, in: 0...100) {
                                 Text("H20")
                             } currentValueLabel: {
-                                Text(String(Hydration))
+                                Text("\(Int(hydration))")
                             }
                             .gaugeStyle(.accessoryCircular)
                             .tint(.blue)
@@ -73,10 +81,10 @@ struct ContentView: View {
                             
                             
                             //Stress Gauge
-                            Gauge(value: Stress, in: 0...100) {
+                            Gauge(value: stress, in: 0...100) {
                                 Text("Stress")
                             } currentValueLabel: {
-                                Text(String(Stress))
+                                Text("\(Int(stress))")
                             }
                             .gaugeStyle(.accessoryCircular)
                             .tint(.purple)
@@ -84,20 +92,20 @@ struct ContentView: View {
                             
                             
                             //Activity Gauge
-                            Gauge(value: Activity, in: 0...100){
+                            Gauge(value: activity, in: 0...100){
                                 Text("Activ")
                             } currentValueLabel: {
-                                Text(String(Activity))
+                                Text("\(Int(activity))")
                             }
                             .gaugeStyle(.accessoryCircular)
                             .tint(.yellow)
                             
                             
                             //Health Level
-                            Gauge(value: HealthScore, in: 0...100){
+                            Gauge(value: healthScore, in: 0...100){
                                 Text("Health")
                             } currentValueLabel: {
-                                Text(String(HealthScore))
+                                Text("\(Int(healthScore))")
                             }
                             .gaugeStyle(.accessoryCircular)
                             .tint(.black)
@@ -109,8 +117,29 @@ struct ContentView: View {
                    
                     
                     Section(header: Text("Health Alerts")) {
-                        Text("tests")
+                        if hydration < 50 {
+                            Text("Low Hydration. Drink more water!")
+                        }
                         
+                    }
+                    
+                    Section(header: Text("Water")){
+                        VStack(alignment: .center){
+                            Text("How much water have you drank today?")
+                            TextField("Enter a number in cups", text: $waterInput)
+                                .textFieldStyle(.roundedBorder)
+                                .keyboardType(.numberPad)
+                                .onChange(of: waterInput) { oldValue, newValue in
+                                    if let cups = Double(newValue) {
+                                        // Convert cups to a 0-100 hydration percentage as an example mapping
+                                        hydration = min(100, max(0, cups / 8.0 * 100))
+                                    } else if newValue.isEmpty {
+                                        hydration = 0
+                                    }
+                                }
+                            
+                            
+                        }
                     }
                 }
             }
