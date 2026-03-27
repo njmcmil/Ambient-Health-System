@@ -6,11 +6,17 @@ struct AmbientHealthObjectView: View {
     
     @StateObject private var simulator = HealthSimulator()
     @State private var selectedTab: AmbientTab = .now
+    
+    @State private var stressSensitivity: Double = 0.7
+    @State private var movementSensitivity: Double = 0.5
+    @State private var recoverySensitivity: Double = 0.6
+    @State private var overallResponsiveness: Double = 0.55
 
     // Keeping navigation intentionally small so the app stays calm and focused.
     enum AmbientTab: String, CaseIterable, Identifiable {
         case now = "Now"
         case explanation = "Explanation"
+        case sensitivity = "Sensitivity"
 
         var id: String { rawValue }
     }
@@ -27,6 +33,8 @@ struct AmbientHealthObjectView: View {
                     nowView
                 case .explanation:
                     explanationView
+                case .sensitivity:
+                    sensitivityView
                 }
             }
             .padding(.horizontal, 20)
@@ -151,7 +159,7 @@ struct AmbientHealthObjectView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 16)
-                        .frame(height: 52)
+                        .frame(height: 43)
                         .background(
                             Color(uiColor: .tertiarySystemBackground),
                             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -175,6 +183,59 @@ struct AmbientHealthObjectView: View {
                 .padding(18)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
+            .padding(.bottom, 40)
+        }
+    }
+
+    
+// --- SENSITIVITY VIEW ---
+    
+    private var sensitivityView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Sensitivity")
+                    .font(.title2.weight(.semibold))
+
+                Text("These controls are simulated for the prototype and let you adjust how responsive the system is to different health patterns.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+
+                sensitivitySlider(
+                    title: "Stress Response",
+                    value: $stressSensitivity
+                )
+
+                sensitivitySlider(
+                    title: "Movement Response",
+                    value: $movementSensitivity
+                )
+
+                sensitivitySlider(
+                    title: "Recovery Response",
+                    value: $recoverySensitivity
+                )
+
+                sensitivitySlider(
+                    title: "Overall Responsiveness",
+                    value: $overallResponsiveness
+                )
+                
+                Text("App Default is recommended for the average user.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                
+                Button {
+                    resetSensitivityToDefault()
+                } label: {
+                    Text("Reset to App Default")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                }
+                .buttonStyle(.bordered)
+                
+            }
+            .padding(.bottom, 40)
         }
     }
 
@@ -532,47 +593,74 @@ struct AmbientHealthObjectView: View {
         switch state {
         case .blue:
             return [
-                "Your body is recovering well.",
-                "You look well-rested.",
-                "Keep doing what you're doing."
+                "Recovery-related signals appear steadier than your usual baseline.",
+                "Sleep and heart rate patterns suggest your body may be recovering well.",
+                "No strong stress or fatigue-related deviation is standing out right now."
             ]
         case .green:
             return [
-                "Your activity level looks healthy.",
-                "Your routine is consistent.",
-                "You're in a good rhythm."
+                "Movement, sleep, and recovery patterns appear fairly consistent.",
+                "Your recent health signals look stable relative to your normal baseline.",
+                "No major shift in stress, heart rate, or activity is standing out."
             ]
         case .yellow:
             return [
-                "You've been inactive for a while.",
-                "Try to move a bit.",
-                "Even a short walk can help."
+                "Movement may be lower than your usual baseline right now.",
+                "This state can appear after longer periods of inactivity or reduced activity trends.",
+                "Heart rate and recovery signals do not appear to be the main drivers here."
             ]
         case .purple:
             return [
-                "Your stress level looks high.",
-                "Your body may need a break.",
-                "Try to slow down and reset."
+                "Stress-related signals may be elevated relative to your normal baseline.",
+                "Heart rate or HRV-related patterns may suggest more strain than usual.",
+                "Recovery and sleep patterns may be contributing to this more tense state."
             ]
         case .gray:
             return [
-                "Everything looks normal.",
-                "No strong signals detected.",
-                "You're stable right now."
+                "Current signals appear close to your normal baseline.",
+                "No strong deviation in movement, stress, heart rate, or recovery is standing out.",
+                "This usually reflects a steady state without a dominant pattern."
             ]
         case .red:
             return [
-                "Something looks off.",
-                "Your body is under strain.",
-                "Pay attention to how you feel."
+                "The current pattern appears more strained than your usual baseline.",
+                "Stress, heart rate, or recovery-related signals may be showing a stronger shift than normal.",
+                "This state is meant to reflect a more significant change in your overall signal."
             ]
         case .orange:
             return [
-                "Fatigue is building up.",
-                "You may need rest soon.",
-                "Consider taking a break."
+                "Fatigue-related patterns may be building relative to your recent baseline.",
+                "Recovery may be lagging behind physical or physiological load.",
+                "Sleep, heart rate, or ongoing strain may be contributing to this state."
             ]
         }
+    }
+
+    private func resetSensitivityToDefault() {
+        stressSensitivity = 0.7
+        movementSensitivity = 0.5
+        recoverySensitivity = 0.6
+        overallResponsiveness = 0.55
+    }
+
+    private func sensitivitySlider(title: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+
+                Spacer()
+
+                Text("\(Int(value.wrappedValue * 100))%")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Slider(value: value, in: 0...1)
+                .tint(.blue)
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
