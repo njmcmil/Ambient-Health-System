@@ -412,40 +412,31 @@ struct AmbientHealthObjectView: View {
     // Simple small recent history strip for the "Now" screen.
     // Keeps some memory of old states, important not to become a another trend view
     private var minimalHistory: some View {
-        VStack(spacing: 8) {
-            Text("Recent tone")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            ForEach(Array(simulator.history.enumerated()), id: \.offset) { entry in
+                let progress = CGFloat(entry.offset) / CGFloat(max(simulator.history.count - 1, 1))
+                let size = 16 + (progress * 14)
+                let opacity = 0.22 + (progress * 0.55)
+                let blur = 4 - (progress * 2)
+                let isLatest = entry.offset == simulator.history.count - 1
 
-            HStack(spacing: 8) {
-                ForEach(Array(simulator.history.enumerated()), id: \.offset) { entry in
-                    let isLatest = entry.offset == simulator.history.indices.last
-
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    entry.element.color.opacity(0.95),
-                                    entry.element.color.opacity(0.55)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: isLatest ? 34 : 26, height: isLatest ? 12 : 10)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(.white.opacity(0.22), lineWidth: 0.6)
+                Circle()
+                    .fill(entry.element.color.opacity(opacity))
+                    .frame(width: size, height: size)
+                    .blur(radius: blur)
+                    .overlay {
+                        if isLatest {
+                            Circle()
+                                .stroke(.white.opacity(0.35), lineWidth: 1)
+                                .frame(width: size + 4, height: size + 4)
                         }
-                        .shadow(
-                            color: entry.element.color.opacity(isLatest ? 0.22 : 0.10),
-                            radius: isLatest ? 8 : 4
-                        )
-                }
+                    }
             }
         }
-        .padding(.top, 6)
+        .frame(height: 34)
+        .padding(.top, 2)
     }
+
     
 // --- SIMULATE BUTTON ---
     // Prototype-only control: state changes can be demonstrated quickly.
