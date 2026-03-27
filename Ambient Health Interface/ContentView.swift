@@ -14,8 +14,6 @@ struct AmbientHealthObjectView: View {
     
     @GestureState private var isPressingBlob = false
 
-
-
     // Keeping navigation intentionally small so the app stays calm and focused.
     enum AmbientTab: String, CaseIterable, Identifiable {
         case now = "Now"
@@ -101,6 +99,7 @@ struct AmbientHealthObjectView: View {
             Spacer()
         }
     }
+    
 // --- EXPLANATION VIEW ---
     
     // More explicit interpretation, but still avoids dashboard-style overload.
@@ -143,7 +142,7 @@ struct AmbientHealthObjectView: View {
                 .padding(18)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 
-                // --- PROTOTYPE CONTROLS + TREND ---
+                // --- PROTOTYPE CONTROLS + PATTERN INSIGHT ---
                 
                 VStack(alignment: .leading, spacing: 16) {
                     
@@ -171,15 +170,23 @@ struct AmbientHealthObjectView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // --- TREND VISUALIZATION ---
+                    // --- PATTERN INSIGHT ---
                     
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Recent Signal Trace")
-                            .font(.headline)
+                        HStack(alignment: .center) {
+                            Text("Pattern Insight")
+                                .font(.headline)
 
-                        trendLineView
+                            Spacer()
 
-                        Text("A lightweight trend mockup showing how interpreted state might shift over time from HealthKit-derived patterns.")
+                            insightHistoryTrail
+                        }
+
+                        Text(patternInsight(for: simulator.currentState))
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+
+                        Text("Based on recent health patterns and how they compare to your usual rhythm.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -348,93 +355,7 @@ struct AmbientHealthObjectView: View {
         }
     }
 
-
     
-// --- TREND SYSTEM ---
-    
-    // simplified-trend view.
-    // It gives a sense of movement over time without becoming a dense health chart.
-    private var trendLineView: some View {
-        let states = simulator.history
-
-        return GeometryReader { geometry in
-            let width = geometry.size.width
-            let height = geometry.size.height
-            let points = trendPoints(for: states, size: geometry.size)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.10))
-
-                // Very faint guide lines so the chart has structure
-                // without pulling too much attention.
-                VStack(spacing: 0) {
-                    ForEach(0..<4, id: \.self) { _ in
-                        Rectangle()
-                            .fill(Color.white.opacity(0.10))
-                            .frame(height: 1)
-                        Spacer()
-                    }
-                }
-                .padding(.vertical, 12)
-
-                if points.count > 1 {
-                    trendAreaPath(points: points, size: geometry.size)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    simulator.currentState.color.opacity(0.18),
-                                    simulator.currentState.color.opacity(0.03)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                    trendCurvePath(points: points)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    simulator.currentState.color.opacity(0.95),
-                                    simulator.currentState.color.opacity(0.60)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
-                        )
-                }
-
-                ForEach(Array(points.enumerated()), id: \.offset) { entry in
-                    let state = states[entry.offset]
-
-                    Circle()
-                        .fill(Color(uiColor: .systemBackground))
-                        .frame(width: 12, height: 12)
-                        .overlay {
-                            Circle()
-                                .fill(state.color)
-                                .frame(width: 7, height: 7)
-                        }
-                        .position(entry.element)
-                }
-
-                HStack {
-                    ForEach(Array(states.enumerated()), id: \.offset) { entry in
-                        Text(shortLabel(for: entry.element))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 4)
-            }
-            .frame(width: width, height: height)
-        }
-        .frame(height: 150)
-    }
 // --- HISTORY + CONTROLS ---
     
     // Simple small recent history strip for the "Now" screen.
@@ -512,76 +433,6 @@ struct AmbientHealthObjectView: View {
         .background(.ultraThinMaterial, in: Capsule())
     }
 
-    // --- TREND-POINTS ---
-    private func trendPoints(for states: [ColorHealthState], size: CGSize) -> [CGPoint] {
-        guard !states.isEmpty else { return [] }
-
-        let horizontalPadding: CGFloat = 12
-        let topPadding: CGFloat = 18
-        let bottomPadding: CGFloat = 26
-
-        let usableWidth = size.width - horizontalPadding * 2
-        let usableHeight = size.height - topPadding - bottomPadding
-        let stepX = states.count > 1 ? usableWidth / CGFloat(states.count - 1) : 0
-
-        return states.enumerated().map { index, state in
-            let x = horizontalPadding + CGFloat(index) * stepX
-            let normalized = trendValue(for: state)
-            let y = topPadding + (1 - normalized) * usableHeight
-            return CGPoint(x: x, y: y)
-        }
-    }
-    
-    // --- TREND-CURVE ---
-    // Smooths the state history into a softer trace so it feels less like a harsh data-intensive graph.
-    private func trendCurvePath(points: [CGPoint]) -> Path {
-        var path = Path()
-        guard let first = points.first else { return path }
-
-        path.move(to: first)
-
-        for index in 1..<points.count {
-            let previous = points[index - 1]
-            let current = points[index]
-            let midX = (previous.x + current.x) / 2
-
-            path.addCurve(
-                to: current,
-                control1: CGPoint(x: midX, y: previous.y),
-                control2: CGPoint(x: midX, y: current.y)
-            )
-        }
-
-        return path
-    }
-
-    // --- TREND-PATH ---
-    private func trendAreaPath(points: [CGPoint], size: CGSize) -> Path {
-        var path = trendCurvePath(points: points)
-        guard let first = points.first, let last = points.last else { return path }
-
-        path.addLine(to: CGPoint(x: last.x, y: size.height - 26))
-        path.addLine(to: CGPoint(x: first.x, y: size.height - 26))
-        path.closeSubpath()
-
-        return path
-    }
-
-    // --- DATA MAPPING HELPERS ---
-    
-    // Maps each symbolic state to a relative..vertical position for the mock trend.
-    private func trendValue(for state: ColorHealthState) -> CGFloat {
-        switch state {
-        case .gray: return 0.20
-        case .blue: return 0.40
-        case .green: return 0.50
-        case .yellow: return 0.64
-        case .orange: return 0.74
-        case .purple: return 0.84
-        case .red: return 0.94
-        }
-    }
-
     // --- TEXT HELPERS ---
     
     private func shortLabel(for state: ColorHealthState) -> String {
@@ -655,6 +506,37 @@ struct AmbientHealthObjectView: View {
         }
     }
 
+    private func patternInsight(for state: ColorHealthState) -> String {
+        switch state {
+        case .blue:
+            return "This pattern may suggest your body has had more room to recover recently."
+        case .green:
+            return "This pattern may reflect a routine that feels relatively steady and well-supported."
+        case .yellow:
+            return "This pattern may be a gentle sign that movement has been harder to maintain lately."
+        case .purple:
+            return "This pattern may suggest that stress has been taking up more space in your recent routine."
+        case .gray:
+            return "This pattern may reflect a period that feels mostly steady, without any strong shifts standing out."
+        case .red:
+            return "This pattern may suggest your body is dealing with more strain than usual right now."
+        case .orange:
+            return "This pattern may be a sign that fatigue has been building over time."
+        }
+    }
+
+    private var insightHistoryTrail: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(simulator.history.enumerated()), id: \.offset) { entry in
+                let isLatest = entry.offset == simulator.history.count - 1
+
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(entry.element.color.opacity(isLatest ? 0.85 : 0.45))
+                    .frame(width: isLatest ? 20 : 14, height: 6)
+            }
+        }
+    }
+
     private func resetSensitivityToDefault() {
         stressSensitivity = 0.7
         movementSensitivity = 0.5
@@ -682,6 +564,7 @@ struct AmbientHealthObjectView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
+
 private struct TouchProfile {
     let boost: CGFloat
     let glow: Double
@@ -773,9 +656,6 @@ private func touchJitter(for state: ColorHealthState, phase: CGFloat, isActive: 
         return 0
     }
 }
-
-
-
 
 #Preview {
     AmbientHealthObjectView()
