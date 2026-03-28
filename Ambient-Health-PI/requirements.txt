@@ -1,0 +1,4 @@
+python-kasa
+fastapi
+uvicorn[standard]
+python-dotenv
