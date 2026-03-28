@@ -18,10 +18,13 @@ final class HealthSimulator: ObservableObject {
         currentState = newState
         history.append(newState)
         
-        // Limit history to avoid unbounded growth (UI stays clean).
+        // Limit history to avoid unbounded growth
         if history.count > 7 {
             history.removeFirst()
         }
+        
+        // Send to Raspberry Pi
+        PiController.shared.sendHealthState(newState)
     }
 
     // Randomly selects a state.

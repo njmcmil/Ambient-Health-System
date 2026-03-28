@@ -47,6 +47,9 @@ struct AmbientHealthObjectView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
         }
+        .onChange(of: simulator.currentState) {
+            PiController.shared.sendHealthState(simulator.currentState)
+        }
     }
     
 // --- BACKGROUND LAYER ---

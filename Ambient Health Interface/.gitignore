@@ -9,3 +9,6 @@ build/
 
 # User-specific state
 *.xcuserstate
+
+# Secrets / environment config
+*.xcconfig
