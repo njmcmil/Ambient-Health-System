@@ -1,24 +1,23 @@
 import Foundation
 import SwiftUI
 
-
 class PiController {
     static let shared = PiController()
     private let baseURL: String
-    // Pi's IP + port
 
     private init() {
-           if let path = Bundle.main.path(forResource: "Secrets", ofType: "plist"),
-              let dict = NSDictionary(contentsOfFile: path) as? [String: String],
-              let url = dict["PI_BASE_URL"] {
-               self.baseURL = url
-           } else {
-               self.baseURL = "http://127.0.0.1:8000" // fallback
-           }
-       }
+        if let url = ProcessInfo.processInfo.environment["PI_BASE_URL"] {
+            self.baseURL = url
+        } else {
+            self.baseURL = "http://127.0.0.1:8000" // fallback
+        }
+    }
 
     func sendHealthState(_ state: ColorHealthState) {
-        guard let url = URL(string: "\(baseURL)/set_color") else { return }
+        guard let url = URL(string: "\(baseURL)/set_color") else {
+            print("Invalid baseURL:", baseURL)
+            return
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

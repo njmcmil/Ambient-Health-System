@@ -50,6 +50,13 @@
             ReferencedContainer = "container:Ambient Health Interface.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "PI_BASE_URL"
+            value = "http://192.168.1.95:8000"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

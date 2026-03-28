@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		75C7ACF62F71FA9200AF1E8C /* Ambient Health Interface.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ambient Health Interface.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		751860E22F7761C700702B82 /* Ambient Health Interface.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ambient Health Interface.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -33,16 +33,8 @@
 			isa = PBXGroup;
 			children = (
 				75C7ACF82F71FA9200AF1E8C /* Ambient Health Interface */,
-				75C7ACF72F71FA9200AF1E8C /* Products */,
+				751860E22F7761C700702B82 /* Ambient Health Interface.app */,
 			);
-			sourceTree = "<group>";
-		};
-		75C7ACF72F71FA9200AF1E8C /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				75C7ACF62F71FA9200AF1E8C /* Ambient Health Interface.app */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -67,7 +59,7 @@
 			packageProductDependencies = (
 			);
 			productName = "Ambient Health Interface";
-			productReference = 75C7ACF62F71FA9200AF1E8C /* Ambient Health Interface.app */;
+			productReference = 751860E22F7761C700702B82 /* Ambient Health Interface.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -95,7 +87,7 @@
 			mainGroup = 75C7ACED2F71FA9200AF1E8C;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 75C7ACF72F71FA9200AF1E8C /* Products */;
+			productRefGroup = 75C7ACED2F71FA9200AF1E8C;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -253,6 +245,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -285,6 +278,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
