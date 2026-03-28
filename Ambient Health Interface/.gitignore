@@ -1,0 +1,14 @@
+# Xcode user data
+xcuserdata/
+
+# Derived data
+DerivedData/
+
+# Build artifacts
+build/
+
+# User-specific state
+*.xcuserstate
+
+# Secrets / environment config
+*.xcconfig
