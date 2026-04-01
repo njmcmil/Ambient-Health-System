@@ -3,6 +3,7 @@ import SwiftUI
 
 class PiController {
     static let shared = PiController()
+
     private let baseURL: String
 
     private init() {
@@ -13,8 +14,8 @@ class PiController {
         }
     }
 
-    func sendHealthState(_ state: ColorHealthState) {
-        guard let url = URL(string: "\(baseURL)/set_color") else {
+    func sendHealthState(_ state: ColorHealthState, brightness: Int = 70) {
+        guard let url = URL(string: "\(baseURL)/set_light") else {
             print("Invalid baseURL:", baseURL)
             return
         }
@@ -23,18 +24,26 @@ class PiController {
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload = ["color": state.rawValue.lowercased()]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        let payload: [String: Any] = [
+            "color": state.rawValue.lowercased(),
+            "brightness": max(0, min(100, brightness)) // safety clamp
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            print("Failed to encode payload")
+            return
+        }
+
         request.httpBody = data
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        URLSession.shared.dataTask(with: request) { _, response, error in
             if let error = error {
                 print("Failed to send to Pi:", error)
                 return
             }
 
             if let httpResponse = response as? HTTPURLResponse {
-                print("Sent \(state.rawValue) to Pi — Status: \(httpResponse.statusCode)")
+                print("Sent \(state.rawValue) @ \(brightness)% — Status: \(httpResponse.statusCode)")
             }
         }.resume()
     }

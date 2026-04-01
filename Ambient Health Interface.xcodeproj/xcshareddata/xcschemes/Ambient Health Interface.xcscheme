@@ -53,7 +53,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "PI_BASE_URL"
-            value = "http://192.168.1.95:8000"
+            value = "https://unabsorptive-untremulously-lawana.ngrok-free.dev"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
