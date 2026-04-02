@@ -71,6 +71,33 @@ final class AmbientHealthStore: ObservableObject {
         var id: Date { date }
     }
 
+    // Each metric baseline stores the user's recent "normal" plus how much that metric naturally
+    // tends to vary. The classifier uses that spread to avoid overreacting to one noisy reading.
+    struct MetricBaseline {
+        let mean: Double
+        let standardDeviation: Double
+        let sampleCount: Int
+
+        var isReliable: Bool {
+            sampleCount >= 5
+        }
+    }
+
+    // This is the multi-week personal reference frame that today's snapshot is compared against.
+    // It keeps the app focused on "different from your usual" instead of "different from a generic threshold."
+    struct BaselineSummary {
+        let windowDays: Int
+        let restingHeartRate: MetricBaseline?
+        let heartRateVariability: MetricBaseline?
+        let respiratoryRate: MetricBaseline?
+        let sleepHours: MetricBaseline?
+        let deepSleepPercent: MetricBaseline?
+        let remSleepPercent: MetricBaseline?
+        let awakePercent: MetricBaseline?
+        let stepCount: MetricBaseline?
+        let exerciseMinutes: MetricBaseline?
+    }
+
     /// Bundles all multi-point series the UI needs after a refresh.
     ///
     /// The app intentionally derives charts and compact history surfaces from one shared report
@@ -150,7 +177,7 @@ final class AmbientHealthStore: ObservableObject {
             case .unavailable:
                 return "Run on a physical iPhone with the Health app available to read live health data."
             case .notDetermined:
-                return "Allow read access to movement, cardio, sleep, respiratory, mindfulness, and hydration signals to drive the ambient state."
+                return "Allow read access to movement, cardio, sleep, respiratory, and mindfulness signals to drive the ambient state."
             case .denied:
                 return "Try reconnecting Health access, then refresh to pull live readings again."
             case .partial:
@@ -192,15 +219,15 @@ final class AmbientHealthStore: ObservableObject {
     /// - latest spot readings like heart rate or HRV
     /// - overnight recovery context like sleep stages
     struct Snapshot {
+        let recentWorkoutMinutes: Double?
+        let minutesSinceRecentWorkout: Double?
         let stepCountToday: Double?
         let activeEnergyToday: Double?
         let exerciseMinutesToday: Double?
         let walkingRunningDistanceToday: Double?
         let flightsClimbedToday: Double?
-        let dietaryWaterTodayLiters: Double?
         let currentHeartRate: Double?
         let restingHeartRate: Double?
-        let walkingHeartRateAverage: Double?
         let heartRateVariability: Double?
         let respiratoryRate: Double?
         let oxygenSaturationPercent: Double?
@@ -217,6 +244,7 @@ final class AmbientHealthStore: ObservableObject {
     @Published private(set) var latestSnapshot: Snapshot?
     @Published private(set) var isRefreshing = false
     @Published private(set) var trendReport: TrendReport?
+    @Published private(set) var baselineSummary: BaselineSummary?
     @Published private(set) var sensitivityProfile: SensitivityProfile = .default
     @Published private(set) var sensitivityPreset: SensitivityPreset = .recommended
     @Published private(set) var signalEntries: [HealthSignalEntry] = []
@@ -231,10 +259,8 @@ final class AmbientHealthStore: ObservableObject {
             .appleExerciseTime,
             .distanceWalkingRunning,
             .flightsClimbed,
-            .dietaryWater,
             .heartRate,
             .restingHeartRate,
-            .walkingHeartRateAverage,
             .heartRateVariabilitySDNN,
             .respiratoryRate,
             .oxygenSaturation,
@@ -248,7 +274,7 @@ final class AmbientHealthStore: ObservableObject {
 
         let quantities = quantityTypes.compactMap(HKObjectType.quantityType(forIdentifier:))
         let categories = categoryTypes.compactMap(HKObjectType.categoryType(forIdentifier:))
-        return Set(quantities + categories)
+        return Set(quantities + categories + [HKObjectType.workoutType()])
     }()
 
     init() {
@@ -294,61 +320,6 @@ final class AmbientHealthStore: ObservableObject {
         return "\(readable) readable  •  \(noRecentData) no recent data"
     }
 
-    /// Condensed metric copy used where the app wants a quick textual summary instead of charts.
-    var metricsLine: String {
-        guard let snapshot = latestSnapshot else {
-            return authorizationState.detail
-        }
-
-        var segments: [String] = []
-
-        if let steps = snapshot.stepCountToday {
-            segments.append("Steps \(Int(steps))")
-        }
-
-        if let activeEnergy = snapshot.activeEnergyToday {
-            segments.append("Energy \(Int(activeEnergy)) kcal")
-        }
-
-        if let exerciseMinutes = snapshot.exerciseMinutesToday {
-            segments.append("Exercise \(Int(exerciseMinutes)) min")
-        }
-
-        if let restingHeartRate = snapshot.restingHeartRate {
-            segments.append("Resting HR \(Int(restingHeartRate)) bpm")
-        }
-
-        if let heartRateVariability = snapshot.heartRateVariability {
-            segments.append("HRV \(Int(heartRateVariability)) ms")
-        }
-
-        if let respiratoryRate = snapshot.respiratoryRate {
-            segments.append("Resp \(Int(respiratoryRate))/min")
-        }
-
-        if let wristTemperatureCelsius = snapshot.wristTemperatureCelsius {
-            segments.append(String(format: "Wrist Temp %+0.1fC", wristTemperatureCelsius))
-        }
-
-        if let oxygenSaturationPercent = snapshot.oxygenSaturationPercent {
-            segments.append("SpO2 \(Int(oxygenSaturationPercent))%")
-        }
-
-        if let sleepStages = snapshot.sleepStages {
-            segments.append("Deep \(Int(sleepStages.deepPercent))%")
-            segments.append("REM \(Int(sleepStages.remPercent))%")
-            segments.append("Awake \(Int(sleepStages.awakePercent))%")
-        } else if let sleepHours = snapshot.sleepHours {
-            segments.append(String(format: "Sleep %.1f h", sleepHours))
-        }
-
-        if let mindfulMinutes = snapshot.mindfulMinutesToday, mindfulMinutes > 0 {
-            segments.append("Mindful \(Int(mindfulMinutes)) min")
-        }
-
-        return segments.isEmpty ? authorizationState.detail : segments.prefix(6).joined(separator: "  •  ")
-    }
-
     func requestAuthorization() async {
         guard HKHealthStore.isHealthDataAvailable() else {
             authorizationState = .unavailable
@@ -382,12 +353,14 @@ final class AmbientHealthStore: ObservableObject {
 
         do {
             let loadedSnapshot = try await loadSnapshot()
+            let loadedBaseline = try await loadBaselineSummary(days: 21)
+            baselineSummary = loadedBaseline
             let loadedTrends = try await loadTrendReport(days: 7, snapshot: loadedSnapshot)
             latestSnapshot = loadedSnapshot
             trendReport = loadedTrends
             signalEntries = signalEntries(for: loadedSnapshot)
             authorizationState = signalEntries.contains(where: { $0.status == .readable }) ? .authorized : .partial
-            setState(classify(snapshot: loadedSnapshot), shouldSendToPi: true)
+            setState(classify(snapshot: loadedSnapshot, baseline: loadedBaseline), shouldSendToPi: true)
         } catch {
             signalEntries = signalEntries(for: latestSnapshot)
             authorizationState = .partial
@@ -401,7 +374,7 @@ final class AmbientHealthStore: ObservableObject {
 
         // Re-run classification immediately so slider changes affect the live ambient state.
         guard let latestSnapshot else { return }
-        setState(classify(snapshot: latestSnapshot), shouldSendToPi: true)
+        setState(classify(snapshot: latestSnapshot, baseline: baselineSummary), shouldSendToPi: true)
     }
 
     func applySensitivityPreset(_ preset: SensitivityPreset) {
@@ -410,7 +383,7 @@ final class AmbientHealthStore: ObservableObject {
         sensitivityPreset = preset
 
         guard let latestSnapshot else { return }
-        setState(classify(snapshot: latestSnapshot), shouldSendToPi: true)
+        setState(classify(snapshot: latestSnapshot, baseline: baselineSummary), shouldSendToPi: true)
     }
 
     private func refreshAuthorizationState() async {
@@ -463,16 +436,17 @@ final class AmbientHealthStore: ObservableObject {
         }
     }
 
-    private func classify(snapshot: Snapshot) -> ColorHealthState {
-        // The classifier blends movement, stress/load, and recovery instead of relying on any single metric.
+    private func classify(snapshot: Snapshot, baseline: BaselineSummary? = nil) -> ColorHealthState {
+        // The classifier is intentionally conservative: it waits for multiple signals to agree and
+        // compares recent values against the user's own multi-week baseline before escalating.
         let profile = sensitivityProfile
         let steps = snapshot.stepCountToday ?? 0
         let activeEnergy = snapshot.activeEnergyToday ?? 0
         let exerciseMinutes = snapshot.exerciseMinutesToday ?? 0
-        let waterLiters = snapshot.dietaryWaterTodayLiters ?? 0
+        let recentWorkoutMinutes = snapshot.recentWorkoutMinutes ?? 0
+        let minutesSinceRecentWorkout = snapshot.minutesSinceRecentWorkout ?? .infinity
         let currentHeartRate = snapshot.currentHeartRate ?? 75
         let restingHeartRate = snapshot.restingHeartRate ?? 70
-        let walkingHeartRateAverage = snapshot.walkingHeartRateAverage ?? restingHeartRate + 10
         let heartRateVariability = snapshot.heartRateVariability ?? 40
         let respiratoryRate = snapshot.respiratoryRate ?? 15
         let oxygenSaturationPercent = snapshot.oxygenSaturationPercent
@@ -490,78 +464,176 @@ final class AmbientHealthStore: ObservableObject {
         let movementWeight = normalizedSensitivity(profile.movement, overall: profile.overall)
         let recoveryWeight = normalizedSensitivity(profile.recovery, overall: profile.overall)
 
-        let movementLowStepThreshold = interpolate(low: 1_400, high: 3_500, factor: movementWeight)
-        let movementLowExerciseThreshold = interpolate(low: 6, high: 18, factor: movementWeight)
-        let movementLowEnergyThreshold = interpolate(low: 180, high: 340, factor: movementWeight)
+        let moderateStressThreshold = interpolate(low: 1.6, high: 1.05, factor: stressWeight)
+        let strongStressThreshold = interpolate(low: 2.4, high: 1.65, factor: stressWeight)
+        let moderateRecoveryThreshold = interpolate(low: 1.45, high: 0.95, factor: recoveryWeight)
+        let strongRecoveryThreshold = interpolate(low: 2.15, high: 1.45, factor: recoveryWeight)
+        let moderateMovementThreshold = interpolate(low: 0.95, high: 0.65, factor: movementWeight)
 
-        let movementStrongStepThreshold = interpolate(low: 8_000, high: 5_000, factor: movementWeight)
-        let movementStrongExerciseThreshold = interpolate(low: 36, high: 18, factor: movementWeight)
-        let movementStrongEnergyThreshold = interpolate(low: 520, high: 320, factor: movementWeight)
+        let restingStrain = positiveDeviation(current: restingHeartRate, baseline: baseline?.restingHeartRate)
+        let hrvStrain = negativeDeviation(current: heartRateVariability, baseline: baseline?.heartRateVariability)
+        let respiratoryStrain = positiveDeviation(current: respiratoryRate, baseline: baseline?.respiratoryRate)
+        let sleepDebt = negativeDeviation(current: sleepHours, baseline: baseline?.sleepHours)
+        let deepSleepDebt = negativeDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent)
+        let remSleepDebt = negativeDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
+        let awakeStrain = positiveDeviation(current: awakePercent, baseline: baseline?.awakePercent)
+        let stepDeficit = negativeDeviation(current: steps, baseline: baseline?.stepCount)
+        let exerciseDeficit = negativeDeviation(current: exerciseMinutes, baseline: baseline?.exerciseMinutes)
+        let stepSurplus = positiveDeviation(current: steps, baseline: baseline?.stepCount)
+        let exerciseSurplus = positiveDeviation(current: exerciseMinutes, baseline: baseline?.exerciseMinutes)
 
-        let sleepWeakThreshold = interpolate(low: 5.0, high: 6.6, factor: recoveryWeight)
-        let hrvWeakThreshold = interpolate(low: 18, high: 30, factor: recoveryWeight)
-        let restingHighThreshold = interpolate(low: 90, high: 78, factor: recoveryWeight)
+        // Not every device/user has every signal every day. This quick reliability check tells us
+        // whether we can trust the personalized baseline path or need to fall back to softer defaults.
+        let baselineReliability = [
+            baseline?.restingHeartRate,
+            baseline?.heartRateVariability,
+            baseline?.respiratoryRate,
+            baseline?.sleepHours
+        ]
+        .compactMap { $0 }
+        .compactMap { $0 }
+        .filter(\.isReliable)
+        .count
 
-        let sleepStrongThreshold = interpolate(low: 8.6, high: 7.0, factor: recoveryWeight)
-        let hrvStrongThreshold = interpolate(low: 58, high: 44, factor: recoveryWeight)
-        let restingStrongThreshold = interpolate(low: 60, high: 66, factor: recoveryWeight)
+        let sleepStageStrong = deepSleepPercent >= 16 && remSleepPercent >= 19 && awakePercent <= 10 && sleepEfficiency >= 85
+        let sleepStageWeak = deepSleepPercent < 10 || remSleepPercent < 15 || awakePercent >= 16 || sleepEfficiency < 80
 
-        let stressHeartRateThreshold = interpolate(low: 106, high: 92, factor: stressWeight)
-        let stressWalkingHeartRateThreshold = interpolate(low: 126, high: 112, factor: stressWeight)
-        let stressHrvThreshold = interpolate(low: 24, high: 34, factor: stressWeight)
-        let stressRespThreshold = interpolate(low: 20, high: 17, factor: stressWeight)
+        // Fallback stress markers are only used when the app does not have enough baseline history yet.
+        let fallbackStressSignals = [
+            restingHeartRate >= interpolate(low: 88, high: 80, factor: stressWeight),
+            heartRateVariability <= interpolate(low: 22, high: 30, factor: stressWeight),
+            respiratoryRate >= interpolate(low: 19.5, high: 17.5, factor: stressWeight),
+            currentHeartRate >= interpolate(low: 108, high: 98, factor: stressWeight) && steps < 2_500 && exerciseMinutes < 12
+        ].filter { $0 }.count
 
-        let cardioStrainHeartRateThreshold = interpolate(low: 118, high: 104, factor: stressWeight)
-        let cardioStrainWalkingThreshold = interpolate(low: 134, high: 120, factor: stressWeight)
-        let respiratoryStrainThreshold = interpolate(low: 21, high: 18.5, factor: stressWeight)
-        let temperatureStrain = wristTemperatureCelsius >= interpolate(low: 0.9, high: 0.5, factor: stressWeight)
-        let temperatureHigh = wristTemperatureCelsius >= interpolate(low: 1.2, high: 0.8, factor: stressWeight)
+        // Workouts should only mute stress briefly while exercise physiology is still dominating
+        // the signal, not for the entire day after a morning session.
+        let workoutInProgress = recentWorkoutMinutes >= 10 && minutesSinceRecentWorkout <= 15
+        let postWorkoutCooldown = recentWorkoutMinutes >= 20 && minutesSinceRecentWorkout <= 60
+        let exercisePhysiologyStillElevated = currentHeartRate >= interpolate(low: 104, high: 96, factor: stressWeight)
+            || respiratoryRate >= interpolate(low: 18.5, high: 17, factor: stressWeight)
+        let workoutSuppressedStress = workoutInProgress || (postWorkoutCooldown && exercisePhysiologyStillElevated)
 
-        // Movement is treated as a broad activity baseline rather than a strict workout-only signal.
-        let movementLow = steps < movementLowStepThreshold && exerciseMinutes < movementLowExerciseThreshold && activeEnergy < movementLowEnergyThreshold
-        let movementStrong = steps >= movementStrongStepThreshold || exerciseMinutes >= movementStrongExerciseThreshold || activeEnergy >= movementStrongEnergyThreshold
-        // Sleep quality matters as much as sleep quantity for recovery-oriented states.
-        let sleepStageStrong = deepSleepPercent >= interpolate(low: 18, high: 13, factor: recoveryWeight)
-            && remSleepPercent >= interpolate(low: 22, high: 17, factor: recoveryWeight)
-            && awakePercent <= interpolate(low: 12, high: 8, factor: recoveryWeight)
-            && sleepEfficiency >= interpolate(low: 88, high: 80, factor: recoveryWeight)
-        let sleepStageWeak = deepSleepPercent < interpolate(low: 8, high: 13, factor: recoveryWeight)
-            || remSleepPercent < interpolate(low: 13, high: 17, factor: recoveryWeight)
-            || awakePercent >= interpolate(low: 20, high: 13, factor: recoveryWeight)
-            || sleepEfficiency < interpolate(low: 74, high: 82, factor: recoveryWeight)
-        let recoveryStrong = sleepHours >= sleepStrongThreshold && sleepStageStrong && heartRateVariability >= hrvStrongThreshold && restingHeartRate <= restingStrongThreshold
-        let recoveryWeak = sleepHours < sleepWeakThreshold || sleepStageWeak || heartRateVariability < hrvWeakThreshold || restingHeartRate >= restingHighThreshold
-        let stressElevated = currentHeartRate >= stressHeartRateThreshold || walkingHeartRateAverage >= stressWalkingHeartRateThreshold || heartRateVariability < stressHrvThreshold || respiratoryRate > stressRespThreshold
-        let cardioStrain = currentHeartRate >= cardioStrainHeartRateThreshold || walkingHeartRateAverage >= cardioStrainWalkingThreshold
-        let respiratoryStrain = respiratoryRate >= respiratoryStrainThreshold
-        let calmingSignals = mindfulMinutes >= 10 || waterLiters >= 1.5
+        // Once the baseline is trustworthy, "stressed" means several signals are off relative to
+        // this person's recent norm, not just that one value crossed a generic line.
+        let baselineStressSignals = [
+            restingStrain >= moderateStressThreshold,
+            hrvStrain >= moderateStressThreshold,
+            respiratoryStrain >= moderateStressThreshold,
+            sleepDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.8
+        ].filter { $0 }.count
+
+        let strongStressSignals = [
+            restingStrain >= strongStressThreshold,
+            hrvStrain >= strongStressThreshold,
+            respiratoryStrain >= strongStressThreshold,
+            awakeStrain >= strongStressThreshold,
+            sleepDebt >= strongStressThreshold
+        ].filter { $0 }.count
+
+        let stressElevated = baselineReliability >= 2
+            ? baselineStressSignals >= 2
+            : fallbackStressSignals >= 2
+
+        // Recovery support tracks the opposite side of the picture: is the body looking more restored
+        // than usual rather than more stressed or drained than usual?
+        let recoverySupport = [
+            negativeDeviation(current: restingHeartRate, baseline: baseline?.restingHeartRate),
+            positiveDeviation(current: heartRateVariability, baseline: baseline?.heartRateVariability),
+            positiveDeviation(current: sleepHours, baseline: baseline?.sleepHours),
+            positiveDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent),
+            positiveDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
+        ]
+
+        let strongRecoverySignals = recoverySupport.filter { $0 >= moderateRecoveryThreshold }.count
+        let exceptionalRecoverySignals = recoverySupport.filter { $0 >= strongRecoveryThreshold }.count
+
+        let recoveryWeak = baselineReliability >= 2
+            ? ([sleepDebt, deepSleepDebt, remSleepDebt, awakeStrain, restingStrain, hrvStrain].filter { $0 >= moderateRecoveryThreshold }.count >= 2)
+            : (sleepHours < interpolate(low: 5.4, high: 6.4, factor: recoveryWeight)
+               || sleepStageWeak
+               || heartRateVariability < interpolate(low: 20, high: 28, factor: recoveryWeight)
+               || restingHeartRate >= interpolate(low: 86, high: 78, factor: recoveryWeight))
+
+        let recoveryStrong = strongRecoverySignals >= 3
+            && exceptionalRecoverySignals >= 1
+            && sleepStageStrong
+            && restingHeartRate <= 75
+
+        let hourOfDay = Calendar.current.component(.hour, from: snapshot.sampledAt)
+
+        // Low-energy detection blends absolute quiet days with "quieter than usual for this user."
+        // It is also time-aware so the app does not call someone low-energy just because it is still morning.
+        let movementLowAbsolute = steps < interpolate(low: 1_600, high: 3_000, factor: movementWeight)
+            && exerciseMinutes < interpolate(low: 8, high: 18, factor: movementWeight)
+            && activeEnergy < interpolate(low: 190, high: 320, factor: movementWeight)
+        let movementLowRelative = stepDeficit >= moderateMovementThreshold && exerciseDeficit >= moderateMovementThreshold * 0.75
+        let movementLowEarlyDay = steps < 900 && exerciseMinutes < 4 && activeEnergy < 120
+        let movementLow = {
+            if hourOfDay < 11 {
+                return false
+            }
+
+            if hourOfDay < 14 {
+                return movementLowEarlyDay || (movementLowAbsolute && movementLowRelative)
+            }
+
+            return movementLowAbsolute || movementLowRelative
+        }()
+
+        // Movement also helps identify grounded / supported days so the model is not purely strain-focused.
+        let movementStrongAbsolute = steps >= interpolate(low: 7_500, high: 5_500, factor: movementWeight)
+            || exerciseMinutes >= interpolate(low: 34, high: 20, factor: movementWeight)
+            || activeEnergy >= interpolate(low: 520, high: 340, factor: movementWeight)
+        let movementStrongRelative = stepSurplus >= moderateMovementThreshold || exerciseSurplus >= moderateMovementThreshold
+        let movementStrong = movementStrongAbsolute || movementStrongRelative
+
+        let calmingSignals = mindfulMinutes >= 10
         let oxygenConcern = oxygenSaturationPercent.map { $0 < 95 } ?? false
         let oxygenCritical = oxygenSaturationPercent.map { $0 < 94 } ?? false
+        let temperatureStrain = wristTemperatureCelsius >= 0.8
+            || (wristTemperatureCelsius >= 0.5 && stressElevated && recoveryWeak)
+        // Exercise can temporarily push cardio markers into the same direction as stress. Only soften
+        // higher-alert states when the picture is mostly cardio-driven and there is no separate sleep,
+        // oxygen, or temperature evidence suggesting a broader strain pattern.
+        let workoutExplainsCardioStrain = workoutSuppressedStress
+            && !oxygenConcern
+            && !temperatureStrain
+            && sleepDebt < moderateRecoveryThreshold
+            && awakeStrain < moderateStressThreshold
+            && deepSleepDebt < moderateRecoveryThreshold
+            && remSleepDebt < moderateRecoveryThreshold
+        let severeStrain = oxygenCritical
+            || strongStressSignals >= 3
+            || (temperatureStrain && strongStressSignals >= 2)
+            || (recoveryWeak && stressElevated && respiratoryStrain >= strongStressThreshold)
+        let moderateStrain = oxygenConcern
+            || (recoveryWeak && (stressElevated || temperatureStrain))
+            || strongStressSignals >= 2
 
-        // State ordering matters. The more acute / stacked conditions are checked first so they
-        // do not get swallowed by softer states like orange, purple, or yellow.
-        if temperatureHigh || cardioStrain && recoveryWeak || oxygenCritical || (recoveryWeak && stressElevated && respiratoryStrain) {
+        // State ordering matters. Severe states now require corroboration across signals.
+        if severeStrain && !workoutExplainsCardioStrain {
             return .red
         }
 
-        if recoveryWeak || (restingHeartRate > 82 && heartRateVariability < 28) || temperatureStrain || oxygenConcern {
+        if moderateStrain && !workoutExplainsCardioStrain {
             return .orange
         }
 
-        if stressElevated && !calmingSignals {
+        if stressElevated && !calmingSignals && !workoutSuppressedStress {
             return .purple
         }
 
-        if movementLow {
-            return .yellow
-        }
-
-        if recoveryStrong && movementStrong && respiratoryRate <= 16 && wristTemperatureCelsius < 0.4 {
+        if recoveryStrong && respiratoryRate <= 17 && wristTemperatureCelsius < 0.5 {
             return .blue
         }
 
-        if movementStrong && sleepHours >= 6.5 && heartRateVariability >= 35 && restingHeartRate <= 75 {
+        if movementStrong && !recoveryWeak && strongRecoverySignals >= 2 {
             return .green
+        }
+
+        if movementLow && !stressElevated && !recoveryWeak {
+            return .yellow
         }
 
         return .gray
@@ -572,19 +644,15 @@ final class AmbientHealthStore: ObservableObject {
         async let steps = totalStepCountToday()
         async let activeEnergy = totalQuantityToday(for: .activeEnergyBurned, unit: .kilocalorie())
         async let exerciseMinutes = totalQuantityToday(for: .appleExerciseTime, unit: .minute())
+        async let recentWorkout = recentWorkoutContext()
         async let walkingRunningDistance = totalQuantityToday(for: .distanceWalkingRunning, unit: .meterUnit(with: .kilo))
         async let flightsClimbed = totalQuantityToday(for: .flightsClimbed, unit: .count())
-        async let dietaryWater = totalQuantityToday(for: .dietaryWater, unit: .liter())
         async let currentHeartRate = latestQuantityValue(
             for: .heartRate,
             unit: HKUnit.count().unitDivided(by: .minute())
         )
         async let restingHeartRate = latestQuantityValue(
             for: .restingHeartRate,
-            unit: HKUnit.count().unitDivided(by: .minute())
-        )
-        async let walkingHeartRateAverage = latestQuantityValue(
-            for: .walkingHeartRateAverage,
             unit: HKUnit.count().unitDivided(by: .minute())
         )
         async let heartRateVariability = latestQuantityValue(
@@ -601,16 +669,18 @@ final class AmbientHealthStore: ObservableObject {
         async let sleepStages = sleepStageBreakdownSinceYesterdayEvening()
         async let mindfulMinutes = categoryDurationToday(for: .mindfulSession)
 
+        let loadedRecentWorkout = try await recentWorkout
+
         return try await Snapshot(
+            recentWorkoutMinutes: loadedRecentWorkout?.durationMinutes,
+            minutesSinceRecentWorkout: loadedRecentWorkout?.minutesSinceEnd,
             stepCountToday: steps,
             activeEnergyToday: activeEnergy,
             exerciseMinutesToday: exerciseMinutes,
             walkingRunningDistanceToday: walkingRunningDistance,
             flightsClimbedToday: flightsClimbed,
-            dietaryWaterTodayLiters: dietaryWater,
             currentHeartRate: currentHeartRate,
             restingHeartRate: restingHeartRate,
-            walkingHeartRateAverage: walkingHeartRateAverage,
             heartRateVariability: heartRateVariability,
             respiratoryRate: respiratoryRate,
             oxygenSaturationPercent: oxygenSaturation.map { $0 * 100 },
@@ -620,6 +690,55 @@ final class AmbientHealthStore: ObservableObject {
             mindfulMinutesToday: mindfulMinutes,
             sampledAt: Date()
         )
+    }
+
+    private struct RecentWorkoutContext {
+        let durationMinutes: Double
+        let minutesSinceEnd: Double
+    }
+
+    private func recentWorkoutContext() async throws -> RecentWorkoutContext? {
+        // Looking back a few hours is enough for the stress classifier. We only need to know whether
+        // exercise physiology could still be distorting HR / HRV right now, not build a workout timeline.
+        let now = Date()
+        let windowStart = Calendar.current.date(byAdding: .hour, value: -4, to: now) ?? now
+        let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: now, options: .strictStartDate)
+        let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: predicate,
+                limit: 1,
+                sortDescriptors: sortDescriptors
+            ) { _, samples, error in
+                if let error {
+                    if Self.isNoDataError(error) {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                guard let workout = samples?.first as? HKWorkout else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                let durationMinutes = workout.duration / 60
+                let minutesSinceEnd = max(0, now.timeIntervalSince(workout.endDate) / 60)
+
+                continuation.resume(
+                    returning: RecentWorkoutContext(
+                        durationMinutes: durationMinutes,
+                        minutesSinceEnd: minutesSinceEnd
+                    )
+                )
+            }
+
+            healthStore.execute(query)
+        }
     }
 
     private func loadTrendReport(
@@ -690,6 +809,47 @@ final class AmbientHealthStore: ObservableObject {
             sleepStages: loadedSleepStages,
             intradayStateTrail: intradayStateTrail,
             stateTrail: stateTrail
+        )
+    }
+
+    private func loadBaselineSummary(days: Int) async throws -> BaselineSummary {
+        async let steps = dailyCumulativeSeries(for: .stepCount, unit: .count(), days: days)
+        async let exerciseMinutes = dailyCumulativeSeries(for: .appleExerciseTime, unit: .minute(), days: days)
+        async let restingHeartRate = dailyAverageSeries(
+            for: .restingHeartRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: days
+        )
+        async let heartRateVariability = dailyAverageSeries(
+            for: .heartRateVariabilitySDNN,
+            unit: HKUnit.secondUnit(with: .milli),
+            days: days
+        )
+        async let respiratoryRate = dailyAverageSeries(
+            for: .respiratoryRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: days
+        )
+        async let sleepStages = dailySleepStageSeries(days: days)
+
+        let loadedSteps = try await steps
+        let loadedExerciseMinutes = try await exerciseMinutes
+        let loadedRestingHeartRate = try await restingHeartRate
+        let loadedHeartRateVariability = try await heartRateVariability
+        let loadedRespiratoryRate = try await respiratoryRate
+        let loadedSleepStages = try await sleepStages
+
+        return BaselineSummary(
+            windowDays: days,
+            restingHeartRate: metricBaseline(from: loadedRestingHeartRate.map(\.value)),
+            heartRateVariability: metricBaseline(from: loadedHeartRateVariability.map(\.value)),
+            respiratoryRate: metricBaseline(from: loadedRespiratoryRate.map(\.value)),
+            sleepHours: metricBaseline(from: loadedSleepStages.map(\.totalSleepHours)),
+            deepSleepPercent: metricBaseline(from: loadedSleepStages.map(\.deepPercent)),
+            remSleepPercent: metricBaseline(from: loadedSleepStages.map(\.remPercent)),
+            awakePercent: metricBaseline(from: loadedSleepStages.map(\.awakePercent)),
+            stepCount: metricBaseline(from: loadedSteps.map(\.value)),
+            exerciseMinutes: metricBaseline(from: loadedExerciseMinutes.map(\.value))
         )
     }
 
@@ -1128,15 +1288,15 @@ final class AmbientHealthStore: ObservableObject {
         return steps.map { stepPoint in
             let sleepStage = sleepMap[stepPoint.date]
             let snapshot = Snapshot(
+                recentWorkoutMinutes: nil,
+                minutesSinceRecentWorkout: nil,
                 stepCountToday: stepPoint.value,
                 activeEnergyToday: nil,
                 exerciseMinutesToday: exerciseMap[stepPoint.date],
                 walkingRunningDistanceToday: nil,
                 flightsClimbedToday: nil,
-                dietaryWaterTodayLiters: nil,
                 currentHeartRate: nil,
                 restingHeartRate: restingMap[stepPoint.date],
-                walkingHeartRateAverage: nil,
                 heartRateVariability: hrvMap[stepPoint.date],
                 respiratoryRate: nil,
                 oxygenSaturationPercent: nil,
@@ -1157,7 +1317,7 @@ final class AmbientHealthStore: ObservableObject {
                 sampledAt: stepPoint.date
             )
 
-            return StateTrendPoint(date: stepPoint.date, state: classify(snapshot: snapshot))
+            return StateTrendPoint(date: stepPoint.date, state: classify(snapshot: snapshot, baseline: baselineSummary))
         }
     }
 
@@ -1175,15 +1335,15 @@ final class AmbientHealthStore: ObservableObject {
 
         return steps.map { stepPoint in
             let hourlySnapshot = Snapshot(
+                recentWorkoutMinutes: snapshot.recentWorkoutMinutes,
+                minutesSinceRecentWorkout: snapshot.minutesSinceRecentWorkout,
                 stepCountToday: stepPoint.value,
                 activeEnergyToday: snapshot.activeEnergyToday,
                 exerciseMinutesToday: exerciseMap[stepPoint.date] ?? snapshot.exerciseMinutesToday,
                 walkingRunningDistanceToday: snapshot.walkingRunningDistanceToday,
                 flightsClimbedToday: snapshot.flightsClimbedToday,
-                dietaryWaterTodayLiters: snapshot.dietaryWaterTodayLiters,
                 currentHeartRate: heartRateMap[stepPoint.date] == 0 ? snapshot.currentHeartRate : heartRateMap[stepPoint.date],
                 restingHeartRate: snapshot.restingHeartRate,
-                walkingHeartRateAverage: snapshot.walkingHeartRateAverage,
                 heartRateVariability: snapshot.heartRateVariability,
                 respiratoryRate: respiratoryRateMap[stepPoint.date] == 0 ? snapshot.respiratoryRate : respiratoryRateMap[stepPoint.date],
                 oxygenSaturationPercent: snapshot.oxygenSaturationPercent,
@@ -1194,8 +1354,37 @@ final class AmbientHealthStore: ObservableObject {
                 sampledAt: stepPoint.date
             )
 
-            return StateTrendPoint(date: stepPoint.date, state: classify(snapshot: hourlySnapshot))
+            return StateTrendPoint(date: stepPoint.date, state: classify(snapshot: hourlySnapshot, baseline: baselineSummary))
         }
+    }
+
+    private func metricBaseline(from values: [Double]) -> MetricBaseline? {
+        let filtered = values.filter { $0 > 0 }
+        guard filtered.count >= 3 else { return nil }
+
+        let mean = filtered.reduce(0, +) / Double(filtered.count)
+        let variance = filtered.reduce(0.0) { partialResult, value in
+            let difference = value - mean
+            return partialResult + (difference * difference)
+        } / Double(filtered.count)
+
+        // Give every baseline a minimum spread so unusually flat histories do not make the classifier
+        // hypersensitive after one slightly-off day.
+        return MetricBaseline(
+            mean: mean,
+            standardDeviation: max(sqrt(variance), max(mean * 0.08, 0.75)),
+            sampleCount: filtered.count
+        )
+    }
+
+    private func positiveDeviation(current: Double, baseline: MetricBaseline?) -> Double {
+        guard let baseline, baseline.standardDeviation > 0 else { return 0 }
+        return max(0, (current - baseline.mean) / baseline.standardDeviation)
+    }
+
+    private func negativeDeviation(current: Double, baseline: MetricBaseline?) -> Double {
+        guard let baseline, baseline.standardDeviation > 0 else { return 0 }
+        return max(0, (baseline.mean - current) / baseline.standardDeviation)
     }
 
     private func normalizedSensitivity(_ sliderValue: Double, overall: Double) -> Double {
@@ -1235,15 +1424,14 @@ final class AmbientHealthStore: ObservableObject {
 
     private func signalEntries(for snapshot: Snapshot?) -> [HealthSignalEntry] {
         let entries: [(String, Bool)] = [
+            ("Recent Workout", snapshot?.recentWorkoutMinutes != nil),
             ("Steps", snapshot?.stepCountToday != nil),
             ("Active Energy", snapshot?.activeEnergyToday != nil),
             ("Exercise Time", snapshot?.exerciseMinutesToday != nil),
             ("Walking Distance", snapshot?.walkingRunningDistanceToday != nil),
             ("Flights Climbed", snapshot?.flightsClimbedToday != nil),
-            ("Hydration", snapshot?.dietaryWaterTodayLiters != nil),
             ("Heart Rate", snapshot?.currentHeartRate != nil),
             ("Resting Heart Rate", snapshot?.restingHeartRate != nil),
-            ("Walking Heart Rate", snapshot?.walkingHeartRateAverage != nil),
             ("HRV", snapshot?.heartRateVariability != nil),
             ("Respiratory Rate", snapshot?.respiratoryRate != nil),
             ("Blood Oxygen", snapshot?.oxygenSaturationPercent != nil),

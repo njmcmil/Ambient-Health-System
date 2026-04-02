@@ -1,13 +1,6 @@
 import SwiftUI
 
-// Represents simplified health states using color as the primary signal.
-// Each state maps to:
-// - a visual color (for the ref.)
-// - a short label (UI)
-// - a message (feedback)
 enum ColorHealthState: String, CaseIterable, Identifiable {
-
-    // Each case represents a different physiological pattern or condition.
     case blue = "Blue"
     case green = "Green"
     case yellow = "Yellow"
@@ -18,51 +11,46 @@ enum ColorHealthState: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    // Visual identity of each state.
-    // Tuned colors for a softer & more ambient feel.
     var color: Color {
         switch self {
-        case .blue: return Color(red: 0.35, green: 0.66, blue: 1.0)     // calm / recovery
-        case .green: return Color(red: 0.28, green: 0.83, blue: 0.56)   // healthy / balanced
-        case .yellow: return Color(red: 1.0, green: 0.80, blue: 0.30)   // low movement warning
-        case .purple: return Color(red: 0.67, green: 0.48, blue: 1.0)   // stress signal
-        case .gray: return Color.gray.opacity(0.65)                     // neutral baseline
-        case .red: return Color(red: 1.0, green: 0.36, blue: 0.36)      // alert / strain
-        case .orange: return Color(red: 1.0, green: 0.58, blue: 0.24)   // fatigue building
+        case .blue: return Color(red: 0.49, green: 0.72, blue: 0.96)    // restored / airy blue
+        case .green: return Color(red: 0.49, green: 0.72, blue: 0.62)   // grounded / muted sage
+        case .yellow: return Color(red: 0.91, green: 0.73, blue: 0.42)  // low energy / soft amber
+        case .purple: return Color(red: 0.73, green: 0.56, blue: 0.88)  // stressed / muted orchid
+        case .gray: return Color(red: 0.70, green: 0.77, blue: 0.84)    // even / soft silver-blue
+        case .red: return Color(red: 0.92, green: 0.42, blue: 0.44)     // overloaded / warm coral-red
+        case .orange: return Color(red: 0.88, green: 0.62, blue: 0.42)  // drained / dusty apricot
         }
     }
 
-    // Short label
     var title: String {
         switch self {
-        case .blue: return "Recovered"
-        case .green: return "On Track"
-        case .yellow: return "Needs Movement"
+        case .blue: return "Restored"
+        case .green: return "Grounded"
+        case .yellow: return "Low Energy"
         case .purple: return "Stressed"
-        case .gray: return "Steady"
-        case .red: return "Warning"
-        case .orange: return "Fatigue Building"
+        case .gray: return "Even"
+        case .red: return "Overloaded"
+        case .orange: return "Drained"
         }
     }
 
-    // Slightly longer explanation for the user.
-    // meant to not be overwhelming.
     var message: String {
         switch self {
         case .blue:
-            return "You seem well-rested and your body is recovering normally."
+            return "Your recent pattern suggests you feel more restored than usual."
         case .green:
-            return "Your activity looks healthy and consistent right now."
+            return "Your recent health signals look balanced, steady, and supported."
         case .yellow:
-            return "You have been still for a while. A short walk might help."
+            return "Your recent pattern looks lower-energy than your usual rhythm."
         case .purple:
-            return "Your body may be under stress. This could be a good time to slow down."
+            return "Several signals suggest a more stressed state than your baseline."
         case .gray:
-            return "Nothing unusual stands out right now. You look stable."
+            return "Nothing strongly unusual stands out right now. Things look pretty even."
         case .red:
-            return "Something looks off. Pay attention to how you feel."
+            return "Multiple signals are stacked higher than usual. This can feel overloaded or overwhelmed."
         case .orange:
-            return "Fatigue may be building. Rest and hydration could help."
+            return "Recovery may be trailing behind your recent load, which can feel draining."
         }
     }
 }

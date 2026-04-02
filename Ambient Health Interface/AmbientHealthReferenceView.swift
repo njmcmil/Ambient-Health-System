@@ -31,8 +31,8 @@ struct AmbientReferenceView: View {
                     angularity: profile.angularity * 0.9,
                     staticAmount: profile.staticAmount * 1.1
                 )
-                .fill(state.color.opacity(profile.glowOpacity * 0.55 + touchGlow))
-                .frame(width: 250, height: 250)
+                .fill(state.color.opacity(profile.glowOpacity * 0.68 + touchGlow))
+                .frame(width: 226, height: 226)
                 .blur(radius: isPressingBlob ? touch.blur : 24)
 
                 ReferenceShape(
@@ -44,17 +44,17 @@ struct AmbientReferenceView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            .white.opacity(isPressingBlob ? 0.98 : 0.92),
-                            state.color.opacity(0.65),
-                            state.color.opacity(0.18)
+                            .white.opacity(isPressingBlob ? 1.0 : 0.95),
+                            state.color.opacity(0.72),
+                            state.color.opacity(0.24)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 180, height: 210)
+                .frame(width: 164, height: 190)
                 .scaleEffect(shellScale + touchScale)
-                .shadow(color: state.color.opacity(isPressingBlob ? 0.24 : 0.14), radius: isPressingBlob ? 24 : 18)
+                .shadow(color: state.color.opacity(isPressingBlob ? 0.28 : 0.16), radius: isPressingBlob ? 24 : 18)
 
                 ReferenceShape(
                     phase: phase * 1.35,
@@ -63,7 +63,7 @@ struct AmbientReferenceView: View {
                     staticAmount: profile.staticAmount * 1.4
                 )
                 .stroke(.white.opacity(isPressingBlob ? touch.edgeOpacity : 0.18), lineWidth: isPressingBlob ? 1.4 : 1)
-                .frame(width: 196, height: 228)
+                .frame(width: 178, height: 208)
 
                 ReferenceShape(
                     phase: phase * 1.8,
@@ -71,13 +71,13 @@ struct AmbientReferenceView: View {
                     angularity: profile.angularity * 1.2,
                     staticAmount: profile.staticAmount * 1.8
                 )
-                .stroke(state.color.opacity(isPressingBlob ? 0.18 : 0.10), lineWidth: 1)
-                .frame(width: 220, height: 246)
+                .stroke(state.color.opacity(isPressingBlob ? 0.22 : 0.13), lineWidth: 1)
+                .frame(width: 198, height: 222)
                 .blur(radius: isPressingBlob ? 2.2 : 1.2)
             }
             .scaleEffect(breathe + touchScale * 0.25)
             .offset(x: jitterX)
-            .frame(width: 280, height: 280)
+            .frame(width: 240, height: 240)
             .contentShape(Rectangle())
             .gesture(pressGesture)
             .animation(touch.animation, value: isPressingBlob)

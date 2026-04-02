@@ -8,18 +8,31 @@ struct AmbientBackgroundView: View {
             LinearGradient(
                 colors: [
                     Color(uiColor: .systemBackground),
-                    Color(uiColor: .secondarySystemBackground)
+                    Color(uiColor: .secondarySystemBackground).opacity(0.99),
+                    state.color.opacity(0.018)
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
             Circle()
-                .fill(state.color.opacity(0.10))
-                .frame(width: 320, height: 320)
-                .blur(radius: 60)
-                .offset(y: -140)
+                .fill(state.color.opacity(0.06))
+                .frame(width: 310, height: 310)
+                .blur(radius: 64)
+                .offset(x: -18, y: -156)
+
+            Circle()
+                .fill(Color.white.opacity(0.035))
+                .frame(width: 190, height: 190)
+                .blur(radius: 42)
+                .offset(x: 90, y: -186)
+
+            Ellipse()
+                .fill(state.color.opacity(0.028))
+                .frame(width: 360, height: 190)
+                .blur(radius: 76)
+                .offset(x: 60, y: 292)
         }
     }
 }
@@ -29,13 +42,13 @@ struct AmbientNowView: View {
 
     var body: some View {
         // Keep *Now* intentionally sparse so the object remains the primary readout.
-        VStack(spacing: 14) {
-            Spacer(minLength: 10)
+        VStack(spacing: 12) {
+            Spacer(minLength: 0)
 
             AmbientNowCalendarCard(healthStore: healthStore)
             AmbientReferenceView(state: healthStore.currentState)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Text(healthStore.currentState.title)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -45,14 +58,14 @@ struct AmbientNowView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 28)
+                    .padding(.horizontal, 34)
             }
 
             AmbientActionButtons(healthStore: healthStore)
 
             Spacer()
         }
-        .safeAreaPadding(.top, 18)
+        .safeAreaPadding(.top, 10)
     }
 }
 
@@ -140,8 +153,20 @@ private struct AmbientNowCalendarCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(cardFill, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .padding(.horizontal, 8)
+    }
+
+    private var cardFill: some ShapeStyle {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.18),
+                Color.white.opacity(0.10),
+                healthStore.currentState.color.opacity(0.03)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private var weekDates: [Date] {
@@ -254,7 +279,18 @@ private struct AmbientMiniMetricChip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [
+                    tint.opacity(0.16),
+                    tint.opacity(0.10),
+                    Color.white.opacity(0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
     }
 }
 

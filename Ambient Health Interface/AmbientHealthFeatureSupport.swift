@@ -5,8 +5,8 @@ import SwiftUI
 
 enum AmbientTab: String, CaseIterable, Identifiable {
     case now = "Now"
-    case trends = "Trends"
     case explanation = "Explanation"
+    case trends = "Trends"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -27,38 +27,13 @@ func tabSymbolName(for tab: AmbientTab) -> String {
 
 func nowLine(for state: ColorHealthState) -> String {
     switch state {
-    case .blue: return "Your body appears to be recovering well."
-    case .green: return "Your recent pattern looks healthy and steady."
-    case .yellow: return "You may benefit from a bit more movement."
-    case .purple: return "Your current pattern suggests increased stress."
-    case .gray: return "Your current state looks stable and neutral."
-    case .red: return "Something in your recent pattern may need attention."
-    case .orange: return "Your recent pattern suggests building fatigue."
-    }
-}
-
-func explanationSummary(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> String {
-    guard let snapshot else { return state.message }
-
-    // Explanation copy is driven from the same snapshot as classification so the language stays grounded.
-    let fragments = explanationDrivers(for: state, snapshot: snapshot)
-    guard let first = fragments.first else { return state.message }
-
-    switch state {
-    case .blue:
-        return "Recovery looks strong right now, led by \(first.lowercased())."
-    case .green:
-        return "Your recent pattern looks balanced overall, with \(first.lowercased()) helping most."
-    case .yellow:
-        return "Lower movement appears to be the main reason for this state, especially \(first.lowercased())."
-    case .purple:
-        return "Stress-related signals are leading this state, with \(first.lowercased()) standing out."
-    case .gray:
-        return "Nothing is dominating the signal right now; the closest driver is \(first.lowercased())."
-    case .red:
-        return "A stronger strain signal is standing out right now, especially \(first.lowercased())."
-    case .orange:
-        return "Recovery looks softer than usual, driven in part by \(first.lowercased())."
+    case .blue: return "Your recent pattern feels more restored."
+    case .green: return "Your recent pattern looks grounded and steady."
+    case .yellow: return "Your recent pattern suggests lower energy and movement."
+    case .purple: return "Your current pattern suggests more stress than usual."
+    case .gray: return "Your current state looks even and neutral."
+    case .red: return "Several strain-related signals are elevated together."
+    case .orange: return "Your recent pattern suggests emotional and physical drain."
     }
 }
 
@@ -85,6 +60,70 @@ func explanationBullets(for state: ColorHealthState, snapshot: AmbientHealthStor
     return Array(bullets.prefix(3))
 }
 
+func explanationSignalChips(snapshot: AmbientHealthStore.Snapshot?) -> [ExplanationSignalChip] {
+    guard let snapshot else { return [] }
+
+    var chips: [ExplanationSignalChip] = []
+
+    if let sleepStages = snapshot.sleepStages {
+        chips.append(
+            ExplanationSignalChip(
+                symbol: "moon.stars.fill",
+                title: "Sleep",
+                value: "\(String(format: "%.1f", sleepStages.totalSleepHours)) h"
+            )
+        )
+    } else if let sleepHours = snapshot.sleepHours {
+        chips.append(
+            ExplanationSignalChip(
+                symbol: "moon.stars.fill",
+                title: "Sleep",
+                value: "\(String(format: "%.1f", sleepHours)) h"
+            )
+        )
+    }
+
+    if let hrv = snapshot.heartRateVariability {
+        chips.append(
+            ExplanationSignalChip(
+                symbol: "waveform.path.ecg",
+                title: "HRV",
+                value: "\(Int(hrv)) ms"
+            )
+        )
+    }
+
+    if let resting = snapshot.restingHeartRate {
+        chips.append(
+            ExplanationSignalChip(
+                symbol: "heart.fill",
+                title: "Resting",
+                value: "\(Int(resting)) bpm"
+            )
+        )
+    }
+
+    if let steps = snapshot.stepCountToday {
+        chips.append(
+            ExplanationSignalChip(
+                symbol: "figure.walk.motion",
+                title: "Movement",
+                value: Int(steps).formatted()
+            )
+        )
+    }
+
+    return Array(chips.prefix(4))
+}
+
+struct ExplanationSignalChip: Identifiable {
+    let symbol: String
+    let title: String
+    let value: String
+
+    var id: String { title }
+}
+
 func patternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> String {
     guard let snapshot else {
         return genericPatternInsight(for: state)
@@ -104,12 +143,12 @@ func patternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Sn
         }
         return "This pattern reflects a relatively steady routine without any one signal pulling too hard."
     case .yellow:
-        return "This pattern is being driven more by inactivity than by stress or recovery strain."
+        return "This pattern looks more low-energy and low-movement than stressed, often showing up when activity and momentum both soften."
     case .purple:
         if let hrv = snapshot.heartRateVariability, let resting = snapshot.restingHeartRate {
-            return "This pattern suggests a stress-loaded moment, especially with HRV around \(Int(hrv)) ms and resting heart rate near \(Int(resting)) bpm."
+            return "This pattern suggests a more stressed state than your recent norm, especially with HRV around \(Int(hrv)) ms and resting heart rate near \(Int(resting)) bpm."
         }
-        return "This pattern suggests stress is taking up more space in your recent signals than movement or recovery."
+        return "This pattern suggests stress is taking up more space in your recent signals than steadiness or recovery."
     case .gray:
         return "This pattern looks close to baseline, with mixed but not strongly directional health signals."
     case .red:
@@ -119,9 +158,9 @@ func patternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Sn
         return "This pattern suggests multiple strain-related signals are stacking rather than a single mild deviation."
     case .orange:
         if let sleepStages = snapshot.sleepStages, sleepStages.awakePercent >= 14 {
-            return "This pattern looks more fatigue-driven, with overnight fragmentation reducing how restorative sleep appears."
+            return "This pattern looks more drained than acute, with overnight fragmentation reducing how restorative sleep appears."
         }
-        return "This pattern suggests recovery is lagging behind your recent load, even if the signal is not fully acute."
+        return "This pattern suggests recovery is lagging behind your recent load, which can leave the overall mood feeling flatter or more worn down."
     }
 }
 
@@ -235,15 +274,15 @@ private func genericExplanationBullets(for state: ColorHealthState) -> [String] 
         ]
     case .yellow:
         return [
-            "Movement may be lower than your usual baseline right now.",
+            "Energy, movement, and outward momentum may be lower than your usual baseline right now.",
             "This state can appear after longer periods of inactivity or reduced activity trends.",
-            "Heart rate and recovery signals do not appear to be the main drivers here."
+            "Stress and recovery signals do not appear to be the main drivers here."
         ]
     case .purple:
         return [
             "Stress-related signals may be elevated relative to your normal baseline.",
-            "Heart rate or HRV-related patterns may suggest more strain than usual.",
-            "Recovery and sleep patterns may be contributing to this more tense state."
+            "Heart rate or HRV-related patterns may suggest a more stressed or keyed-up state than usual.",
+            "Recovery and sleep patterns may be contributing to this more stressed state."
         ]
     case .gray:
         return [
@@ -254,12 +293,12 @@ private func genericExplanationBullets(for state: ColorHealthState) -> [String] 
     case .red:
         return [
             "The current pattern appears more strained than your usual baseline.",
-            "Stress, heart rate, or recovery-related signals may be showing a stronger shift than normal.",
+            "Several stress, cardio, or recovery-related signals may be shifting together rather than one noisy reading standing alone.",
             "This state is meant to reflect a more significant change in your overall signal."
         ]
     case .orange:
         return [
-            "Fatigue-related patterns may be building relative to your recent baseline.",
+            "Drain-related patterns may be building relative to your recent baseline.",
             "Recovery may be lagging behind physical or physiological load.",
             "Sleep, heart rate, or ongoing strain may be contributing to this state."
         ]
@@ -273,7 +312,7 @@ private func genericPatternInsight(for state: ColorHealthState) -> String {
     case .green:
         return "This pattern may reflect a routine that feels relatively steady and well-supported."
     case .yellow:
-        return "This pattern may be a gentle sign that movement has been harder to maintain lately."
+        return "This pattern may be a gentle sign that your energy or drive has been lower lately."
     case .purple:
         return "This pattern may suggest that stress has been taking up more space in your recent routine."
     case .gray:
@@ -281,6 +320,6 @@ private func genericPatternInsight(for state: ColorHealthState) -> String {
     case .red:
         return "This pattern may suggest your body is dealing with more strain than usual right now."
     case .orange:
-        return "This pattern may be a sign that fatigue has been building over time."
+        return "This pattern may be a sign that drain or fatigue has been building over time."
     }
 }
