@@ -31,7 +31,7 @@ func nowLine(for state: ColorHealthState) -> String {
     case .green: return "Your recent pattern looks grounded and steady."
     case .yellow: return "Your recent pattern suggests lower energy and movement."
     case .purple: return "Your current pattern suggests more stress than usual."
-    case .gray: return "Your current state looks even and neutral."
+    case .gray: return "Your current pattern looks neutral and steady."
     case .red: return "Several strain-related signals are elevated together."
     case .orange: return "Your recent pattern suggests emotional and physical drain."
     }
@@ -288,7 +288,7 @@ private func genericExplanationBullets(for state: ColorHealthState) -> [String] 
         return [
             "Current signals appear close to your normal baseline.",
             "No strong deviation in movement, stress, heart rate, or recovery is standing out.",
-            "This usually reflects a steady state without a dominant pattern."
+            "This usually reflects a more neutral state without one dominant pattern taking over."
         ]
     case .red:
         return [
@@ -316,7 +316,7 @@ private func genericPatternInsight(for state: ColorHealthState) -> String {
     case .purple:
         return "This pattern may suggest that stress has been taking up more space in your recent routine."
     case .gray:
-        return "This pattern may reflect a period that feels mostly steady, without any strong shifts standing out."
+        return "This pattern may reflect a more neutral stretch, without any strong shifts standing out."
     case .red:
         return "This pattern may suggest your body is dealing with more strain than usual right now."
     case .orange:

@@ -46,20 +46,26 @@ struct AmbientNowView: View {
             Spacer(minLength: 0)
 
             AmbientNowCalendarCard(healthStore: healthStore)
+            Spacer(minLength: 10)
             AmbientReferenceView(state: healthStore.currentState)
+                .padding(.top, 8)
 
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Text(healthStore.currentState.title)
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 28, weight: .medium, design: .rounded))
+                    .tracking(0.2)
                     .foregroundStyle(.primary)
 
                 Text(nowLine(for: healthStore.currentState))
-                    .font(.body)
+                    .font(.callout)
+                    .lineSpacing(2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 34)
+                    .frame(maxWidth: 270)
+                    .padding(.horizontal, 24)
             }
+            .padding(.top, 14)
 
             AmbientActionButtons(healthStore: healthStore)
 
@@ -139,7 +145,7 @@ private struct AmbientNowCalendarCard: View {
                             .overlay {
                                 Circle()
                                     .stroke(
-                                        isToday ? healthStore.currentState.color.opacity(0.45) : stateColor.opacity(0.22),
+                                        isToday ? todayWheelAccentColor.opacity(0.45) : stateColor.opacity(0.22),
                                         lineWidth: isToday ? 1.2 : 0.9
                                     )
                             }
@@ -213,6 +219,16 @@ private struct AmbientNowCalendarCard: View {
         }
 
         return Color.white
+    }
+
+    private var todayWheelAccentColor: Color {
+        guard let points = healthStore.trendReport?.intradayStateTrail, !points.isEmpty else {
+            return healthStore.currentState.color
+        }
+
+        // Match the outer ring to the most recent state in today's wheel so the day marker
+        // does not look split between two unrelated moods.
+        return points.last?.state.color ?? healthStore.currentState.color
     }
 }
 
@@ -319,20 +335,13 @@ private struct AmbientActionButtons: View {
                         .frame(height: 38)
                 }
                 .buttonStyle(.borderedProminent)
-            } else {
-                Button {
-                    Task {
-                        // Refresh pulls a fresh snapshot and recomputes the ambient state from live Health data.
-                        await healthStore.refresh()
-                    }
-                } label: {
-                    Text(healthStore.isRefreshing ? "Refreshing..." : "Refresh")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(healthStore.isRefreshing)
+            } else if healthStore.isRefreshing {
+                Text("Refreshing Apple Health...")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .background(.thinMaterial, in: Capsule())
             }
 
         }

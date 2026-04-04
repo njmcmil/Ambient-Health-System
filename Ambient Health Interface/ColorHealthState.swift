@@ -19,7 +19,7 @@ enum ColorHealthState: String, CaseIterable, Identifiable {
         case .purple: return Color(red: 0.73, green: 0.56, blue: 0.88)  // stressed / muted orchid
         case .gray: return Color(red: 0.70, green: 0.77, blue: 0.84)    // even / soft silver-blue
         case .red: return Color(red: 0.92, green: 0.42, blue: 0.44)     // overloaded / warm coral-red
-        case .orange: return Color(red: 0.88, green: 0.62, blue: 0.42)  // drained / dusty apricot
+        case .orange: return Color(red: 0.97, green: 0.62, blue: 0.20)  // drained / clearer orange
         }
     }
 
@@ -29,7 +29,7 @@ enum ColorHealthState: String, CaseIterable, Identifiable {
         case .green: return "Grounded"
         case .yellow: return "Low Energy"
         case .purple: return "Stressed"
-        case .gray: return "Even"
+        case .gray: return "Neutral"
         case .red: return "Overloaded"
         case .orange: return "Drained"
         }
@@ -46,7 +46,7 @@ enum ColorHealthState: String, CaseIterable, Identifiable {
         case .purple:
             return "Several signals suggest a more stressed state than your baseline."
         case .gray:
-            return "Nothing strongly unusual stands out right now. Things look pretty even."
+            return "Nothing strongly unusual stands out right now. Your recent pattern looks more neutral."
         case .red:
             return "Multiple signals are stacked higher than usual. This can feel overloaded or overwhelmed."
         case .orange:

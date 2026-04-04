@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 // These detail screens intentionally hold the more explicit, inspectable layer of the app.
 // The main Now screen stays ambient
@@ -24,32 +23,7 @@ struct AmbientTrendsView: View {
                         trendReport: trendReport,
                         currentState: healthStore.currentState
                     )
-                    AmbientLineTrendCard(
-                        title: "Sleep Duration",
-                        symbol: "bed.double.fill",
-                        subtitle: "A simple view of how much sleep you've been getting across the last week.",
-                        points: trendReport.sleepHours,
-                        color: .blue,
-                        unitLabel: "hours"
-                    )
-                    AmbientLineTrendCard(
-                        title: "Heart Rate Variability",
-                        symbol: "waveform.path.ecg",
-                        subtitle: "A useful signal for resilience, recovery, and tension.",
-                        points: trendReport.heartRateVariability,
-                        color: .teal,
-                        unitLabel: "ms",
-                        valueFormatter: { Int($0).formatted() },
-                        summaryText: weeklyTrendSummary(
-                            points: trendReport.heartRateVariability,
-                            lowMeaning: "HRV has looked a bit lower than your recent norm, which can line up with more strain or less recovery",
-                            highMeaning: "HRV has looked stronger than your recent norm, which usually points to steadier recovery",
-                            unit: "ms",
-                            formatter: { Int($0).formatted() },
-                            includeLatest: false
-                        ),
-                        latestBeforeSummary: true
-                    )
+                    AmbientHRVTrendCard(points: trendReport.heartRateVariability)
                     AmbientHeartTrendCard(
                         points: trendReport.restingHeartRate
                     )
@@ -57,6 +31,7 @@ struct AmbientTrendsView: View {
                         steps: trendReport.steps,
                         exerciseMinutes: trendReport.exerciseMinutes
                     )
+                    AmbientSleepDurationCard(points: trendReport.sleepHours)
                     AmbientSleepQualitySummaryCard(points: trendReport.sleepStages)
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
@@ -235,7 +210,6 @@ private struct AmbientSummaryRow: View {
 private struct AmbientEnergyRhythmCard: View {
     let steps: [AmbientHealthStore.TrendPoint]
     let exerciseMinutes: [AmbientHealthStore.TrendPoint]
-    @State private var showsChart = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -256,126 +230,404 @@ private struct AmbientEnergyRhythmCard: View {
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            DisclosureGroup(isExpanded: $showsChart) {
-                Chart {
-                    ForEach(steps) { point in
-                        BarMark(
-                            x: .value("Day", point.date),
-                            y: .value("Steps", point.value),
-                            width: .fixed(16)
+            let displayPoints = meaningfulTrendPoints(steps)
+            let exerciseMap = Dictionary(uniqueKeysWithValues: exerciseMinutes.map { ($0.date, $0.value) })
+
+            if !displayPoints.isEmpty {
+                HStack(alignment: .bottom, spacing: 7) {
+                    ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
+                        let point = entry.element
+                        let exercise = exerciseMap[point.date] ?? 0
+                        let intensity = energyIntensity(
+                            steps: point.value,
+                            exercise: exercise,
+                            stepSeries: displayPoints,
+                            exerciseSeries: exerciseMinutes
                         )
-                        .foregroundStyle(Color.green.opacity(0.55))
-                    }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) { value in
-                        AxisValueLabel {
-                            if let date = value.as(Date.self) {
-                                Text(shortDayLabel(for: date))
+                        let dotSize = energyDotSize(for: intensity)
+                        let haloSize = max(26, dotSize * 2.8)
+                        let lineHeight = energyLineHeight(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
+                        let isLatest = entry.offset == displayPoints.count - 1
+
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Capsule(style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.green.opacity(0.22 + (0.18 * intensity)),
+                                                Color.green.opacity(0.05)
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: 7, height: lineHeight)
+                                    .overlay(alignment: .top) {
+                                        Circle()
+                                            .fill(
+                                                RadialGradient(
+                                                    colors: [
+                                                        Color.green.opacity(0.32 + (0.16 * intensity)),
+                                                        Color.green.opacity(0.12),
+                                                        .clear
+                                                    ],
+                                                    center: .center,
+                                                    startRadius: 1,
+                                                    endRadius: haloSize / 2
+                                                )
+                                            )
+                                            .frame(width: haloSize, height: haloSize)
+                                            .blur(radius: 8)
+                                            .overlay {
+                                                Circle()
+                                                    .fill(Color.green.opacity(isLatest ? 0.94 : 0.82))
+                                                    .frame(width: dotSize, height: dotSize)
+                                                    .overlay {
+                                                        Circle()
+                                                            .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                                                    }
+                                            }
+                                    }
+                                    .overlay(alignment: .bottom) {
+                                        if isLatest {
+                                            Image(systemName: "figure.walk.motion")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(Color.green.opacity(0.92))
+                                                .padding(.bottom, -16)
+                                        }
+                                    }
                             }
+                            .frame(height: 58)
+
+                            Text("\(abbreviatedSteps(point.value))")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity)
                     }
                 }
-                .frame(height: 120)
-                .padding(.top, 10)
-            } label: {
-                AmbientChartToggleLabel(
-                    title: "Show movement chart",
-                    tint: .green
+                .padding(.vertical, 10)
+                .padding(.horizontal, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.06),
+                                    Color.green.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                 )
+            } else {
+                Text("Not enough recent data yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(18)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
+
+    private func energyIntensity(
+        steps: Double,
+        exercise: Double,
+        stepSeries: [AmbientHealthStore.TrendPoint],
+        exerciseSeries: [AmbientHealthStore.TrendPoint]
+    ) -> CGFloat {
+        let stepValues = stepSeries.map(\.value)
+        let exerciseValues = meaningfulTrendPoints(exerciseSeries).map(\.value)
+
+        let stepScore: Double = {
+            guard let minimum = stepValues.min(), let maximum = stepValues.max(), maximum - minimum >= 1 else { return 0.45 }
+            return min(max((steps - minimum) / (maximum - minimum), 0), 1)
+        }()
+
+        let exerciseScore: Double = {
+            guard let minimum = exerciseValues.min(), let maximum = exerciseValues.max(), maximum - minimum >= 1 else { return 0.45 }
+            return min(max((exercise - minimum) / (maximum - minimum), 0), 1)
+        }()
+
+        return CGFloat((stepScore * 0.7) + (exerciseScore * 0.3))
+    }
+
+    private func energyDotSize(for normalized: CGFloat) -> CGFloat {
+        let size = 8 + (normalized * 3)
+        if !size.isFinite {
+            return 10
+        }
+        return min(max(size, 8), 11)
+    }
+
+    private func energyLineHeight(for normalized: CGFloat, recencyIndex: Int, totalCount: Int) -> CGFloat {
+        let recencyFactor = CGFloat(recencyIndex + 1) / CGFloat(max(totalCount, 1))
+        let height = 20 + (recencyFactor * 14) + (normalized * 10)
+        if !height.isFinite {
+            return 28
+        }
+        return min(max(height, 20), 40)
+    }
 }
 
-private struct AmbientLineTrendCard: View {
-    let title: String
-    var symbol: String = "waveform.path.ecg"
-    let subtitle: String
+private struct AmbientHRVTrendCard: View {
     let points: [AmbientHealthStore.TrendPoint]
-    let color: Color
-    let unitLabel: String
-    var valueFormatter: (Double) -> String = { String(format: "%.1f", $0) }
-    var summaryText: String? = nil
-    var latestBeforeSummary: Bool = false
-    @State private var showsChart = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: title, symbol: symbol, tint: color)
+            AmbientCardHeader(title: "Heart Rate Variability", symbol: "waveform.path.ecg", tint: .teal)
 
-            Text(subtitle)
+            Text("A softer read on recovery, steadiness, and tension across the week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            if let latest = points.last, latestBeforeSummary {
-                Text("Latest: \(valueFormatter(latest.value)) \(unitLabel)")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
+            let displayPoints = meaningfulTrendPoints(points)
 
-            if let summaryText {
-                Text(summaryText)
+            if !displayPoints.isEmpty {
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
+                        let point = entry.element
+                        let intensity = normalizedValue(for: point.value, in: displayPoints)
+                        let pulseHeight = pulseHeight(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
+                        let haloWidth = max(18, pulseHeight * 0.95)
+                        let isLatest = entry.offset == displayPoints.count - 1
+
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Capsule(style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.teal.opacity(0.22 + (0.18 * intensity)),
+                                                Color.teal.opacity(0.05)
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: 8, height: pulseHeight)
+                                    .overlay {
+                                        Capsule(style: .continuous)
+                                            .stroke(Color.white.opacity(0.08), lineWidth: 0.8)
+                                    }
+                                    .background {
+                                        Capsule(style: .continuous)
+                                            .fill(Color.teal.opacity(0.16))
+                                            .frame(width: haloWidth, height: max(28, pulseHeight + 10))
+                                            .blur(radius: 10)
+                                    }
+                                    .overlay(alignment: .top) {
+                                        if isLatest {
+                                            Image(systemName: "waveform.path.ecg")
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(Color.teal.opacity(0.92))
+                                                .padding(.top, -16)
+                                        }
+                                    }
+                            }
+                            .frame(height: 62)
+
+                            Text("\(Int(point.value)) ms")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.06),
+                                    Color.teal.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+            } else {
+                Text("Not enough recent data yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
-            if let latest = points.last, !latestBeforeSummary {
-                Text("Latest: \(valueFormatter(latest.value)) \(unitLabel)")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            DisclosureGroup(isExpanded: $showsChart) {
-                // Shared chart card for signals that are still easiest to understand as a light weekly line.
-                Chart(points) { point in
-                    AreaMark(
-                        x: .value("Day", point.date),
-                        y: .value(title, point.value)
-                    )
-                    .foregroundStyle(color.opacity(0.14))
-
-                    LineMark(
-                        x: .value("Day", point.date),
-                        y: .value(title, point.value)
-                    )
-                    .foregroundStyle(color)
-                    .lineStyle(.init(lineWidth: 3, lineCap: .round, lineJoin: .round))
-
-                    PointMark(
-                        x: .value("Day", point.date),
-                        y: .value(title, point.value)
-                    )
-                    .foregroundStyle(color)
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) { value in
-                        AxisValueLabel {
-                            if let date = value.as(Date.self) {
-                                Text(shortDayLabel(for: date))
-                            }
-                        }
-                    }
-                }
-                .frame(height: 160)
-                .padding(.top, 10)
-            } label: {
-                AmbientChartToggleLabel(
-                    title: "Show chart",
-                    tint: color
-                )
-            }
+            Text(weeklyTrendSummary(
+                points: points,
+                lowMeaning: "HRV has looked a bit lower than your recent norm, which can line up with more strain or less recovery",
+                highMeaning: "HRV has looked stronger than your recent norm, which usually points to steadier recovery",
+                unit: "ms",
+                formatter: { Int($0).formatted() },
+                includeLatest: false
+            ))
+            .font(.footnote)
+                .foregroundStyle(.secondary)
         }
         .padding(18)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func normalizedValue(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
+        let values = points.map(\.value)
+        guard let minimum = values.min(), let maximum = values.max(), maximum - minimum >= 0.1 else { return 0.45 }
+        let raw = (value - minimum) / (maximum - minimum)
+        return CGFloat(min(max(raw, 0), 1))
+    }
+
+    private func pulseHeight(for normalized: CGFloat, recencyIndex: Int, totalCount: Int) -> CGFloat {
+        let recencyFactor = CGFloat(recencyIndex + 1) / CGFloat(max(totalCount, 1))
+        let height = 20 + (recencyFactor * 12) + (normalized * 8)
+        if !height.isFinite {
+            return 28
+        }
+        return min(max(height, 20), 40)
+    }
+}
+
+private struct AmbientSleepDurationCard: View {
+    let points: [AmbientHealthStore.TrendPoint]
+
+    private let tint = Color(red: 0.73, green: 0.56, blue: 0.88)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            AmbientCardHeader(title: "Sleep Duration", symbol: "bed.double.fill", tint: tint)
+
+            Text("A quiet weekly picture of how much sleep has been landing each night.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            let displayPoints = meaningfulTrendPoints(points)
+
+            if !displayPoints.isEmpty {
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
+                        let point = entry.element
+                        let intensity = normalizedValue(for: point.value, in: displayPoints)
+                        let moonSize = moonSize(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
+                        let glowSize = max(26, moonSize * 2.2)
+                        let drift = moonDrift(for: intensity)
+                        let isLatest = entry.offset == displayPoints.count - 1
+
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        RadialGradient(
+                                            colors: [
+                                                tint.opacity(0.22 + (0.14 * intensity)),
+                                                tint.opacity(0.08),
+                                                .clear
+                                            ],
+                                            center: .center,
+                                            startRadius: 1,
+                                            endRadius: glowSize / 2
+                                        )
+                                    )
+                                    .frame(width: glowSize, height: glowSize)
+                                    .blur(radius: 9)
+
+                                Image(systemName: isLatest ? "moon.zzz.fill" : "moon.stars.fill")
+                                    .font(.system(size: moonSize, weight: .semibold))
+                                    .foregroundStyle(tint.opacity(isLatest ? 0.96 : 0.84))
+                                    .offset(x: drift * 0.35)
+
+                                if !isLatest {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 7, weight: .semibold))
+                                        .foregroundStyle(tint.opacity(0.70))
+                                        .offset(x: moonSize * 0.42, y: -moonSize * 0.34)
+                                }
+                            }
+                            .frame(height: 52)
+
+                            Text(String(format: "%.1f h", point.value))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.06),
+                                    tint.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+            } else {
+                Text("Not enough recent data yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(weeklyTrendSummary(
+                points: points,
+                lowMeaning: "sleep duration has looked lighter than your recent norm",
+                highMeaning: "sleep duration has looked fuller than your recent norm",
+                unit: "h",
+                formatter: { String(format: "%.1f", $0) },
+                includeLatest: false
+            ))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func normalizedValue(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
+        let values = points.map(\.value)
+        guard let minimum = values.min(), let maximum = values.max(), maximum - minimum >= 0.1 else { return 0.45 }
+        let raw = (value - minimum) / (maximum - minimum)
+        return CGFloat(min(max(raw, 0), 1))
+    }
+
+    private func moonSize(for normalized: CGFloat, recencyIndex: Int, totalCount: Int) -> CGFloat {
+        let recencyFactor = CGFloat(recencyIndex + 1) / CGFloat(max(totalCount, 1))
+        let size = 12 + (recencyFactor * 4) + (normalized * 1.5)
+        if !size.isFinite {
+            return 14
+        }
+        return min(max(size, 12), 17)
+    }
+
+    private func moonDrift(for normalized: CGFloat) -> CGFloat {
+        let drift = -2 + (normalized * 2.5)
+        if !drift.isFinite {
+            return -1
+        }
+        return min(max(drift, -2), 1.5)
     }
 }
 
 private struct AmbientHeartTrendCard: View {
     let points: [AmbientHealthStore.TrendPoint]
-    @State private var showsChart = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -385,37 +637,19 @@ private struct AmbientHeartTrendCard: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            if let latest = points.last {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Latest: \(Int(latest.value)) bpm")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.secondary)
+            let displayPoints = meaningfulTrendPoints(points)
 
-                    Text(inverseWeeklyTrendSummary(
-                        points: points,
-                        lowMeaning: "your resting rhythm has looked calmer than your weekly norm",
-                        highMeaning: "your resting rhythm has looked a little more activated than your weekly norm",
-                        unit: "bpm",
-                        formatter: { Int($0).formatted() },
-                        includeLatest: false
-                    ))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            DisclosureGroup(isExpanded: $showsChart) {
-                // Older days stay smaller and quieter, while newer days carry more weight in the trail.
-                // The goal is to make this feel like an ambient pulse over time rather than a literal chart.
+            if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 4) {
-                    ForEach(Array(points.enumerated()), id: \.offset) { entry in
+                    ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
                         let point = entry.element
-                        let intensity = normalizedIntensity(for: point.value)
-                        let heartSize = safeHeartSize(for: intensity, recencyIndex: entry.offset)
+                        let intensity = normalizedIntensity(for: point.value, in: displayPoints)
+                        let heartSize = safeHeartSize(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
                         let glowColor = heartColor(for: intensity)
                         let haloSize = max(24, heartSize * 2.15)
+                        let isLatest = entry.offset == displayPoints.count - 1
 
-                        VStack(spacing: 8) {
+                        VStack(spacing: 6) {
                             ZStack {
                                 Circle()
                                     .fill(
@@ -441,11 +675,15 @@ private struct AmbientHeartTrendCard: View {
                                     .font(.system(size: heartSize, weight: .semibold))
                                     .foregroundStyle(glowColor)
                                     .shadow(color: glowColor.opacity(0.24), radius: 8, y: 0)
-                                    .scaleEffect(entry.offset == points.count - 1 ? 1.03 : 1.0)
+                                    .scaleEffect(isLatest ? 1.03 : 1.0)
                             }
                             .frame(height: 42 + heartSize)
 
-                            Text(shortDayLabel(for: point.date))
+                            Text("\(Int(point.value)) bpm")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -469,19 +707,28 @@ private struct AmbientHeartTrendCard: View {
                             )
                         )
                 )
-                .padding(.top, 10)
-            } label: {
-                AmbientChartToggleLabel(
-                    title: "Show heart trail",
-                    tint: Color(red: 1.0, green: 0.20, blue: 0.22)
-                )
+            } else {
+                Text("Not enough recent data yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
+
+            Text(inverseWeeklyTrendSummary(
+                points: points,
+                lowMeaning: "your resting rhythm has looked calmer than your weekly norm",
+                highMeaning: "your resting rhythm has looked a little more activated than your weekly norm",
+                unit: "bpm",
+                formatter: { Int($0).formatted() },
+                includeLatest: false
+            ))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
         .padding(18)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func normalizedIntensity(for value: Double) -> CGFloat {
+    private func normalizedIntensity(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
         guard let range = restingHeartRateRange(for: points) else { return 0.45 }
         if range.upperBound - range.lowerBound < 1 {
             return 0.45
@@ -495,15 +742,15 @@ private struct AmbientHeartTrendCard: View {
         return CGFloat(min(max(raw, 0), 1))
     }
 
-    private func safeHeartSize(for normalized: CGFloat, recencyIndex: Int) -> CGFloat {
+    private func safeHeartSize(for normalized: CGFloat, recencyIndex: Int, totalCount: Int) -> CGFloat {
         // Recency does most of the visual work; intensity adds just enough variation to show the week
         // without making the trail look noisy or clinical.
-        let recencyFactor = CGFloat(recencyIndex + 1) / CGFloat(max(points.count, 1))
-        let size = 8 + (recencyFactor * 7) + (normalized * 5)
+        let recencyFactor = CGFloat(recencyIndex + 1) / CGFloat(max(totalCount, 1))
+        let size = 10 + (recencyFactor * 5) + (normalized * 2.5)
         if !size.isFinite {
             return 14
         }
-        return min(max(size, 9), 19)
+        return min(max(size, 12), 17.5)
     }
 
     private func heartColor(for normalized: CGFloat) -> Color {
@@ -703,6 +950,25 @@ private func weeklyAverage(for points: [AmbientHealthStore.TrendPoint]) -> Doubl
     return values.reduce(0, +) / Double(values.count)
 }
 
+private func meaningfulTrendPoints(_ points: [AmbientHealthStore.TrendPoint]) -> [AmbientHealthStore.TrendPoint] {
+    points.filter { $0.value > 0 }
+}
+
+private func latestMeaningfulPoint(in points: [AmbientHealthStore.TrendPoint]) -> AmbientHealthStore.TrendPoint? {
+    meaningfulTrendPoints(points).last
+}
+
+private func abbreviatedSteps(_ value: Double) -> String {
+    let steps = Int(value)
+    if steps >= 10_000 {
+        return String(format: "%.1fk", Double(steps) / 1_000)
+    }
+    if steps >= 1_000 {
+        return "\(steps / 1_000)k"
+    }
+    return steps.formatted()
+}
+
 private func restingHeartRateRange(for points: [AmbientHealthStore.TrendPoint]) -> ClosedRange<Double>? {
     let values = points.map(\.value).filter { $0 > 0 }
     guard let min = values.min(), let max = values.max() else { return nil }
@@ -736,7 +1002,7 @@ private func weeklyTrendSummary(
     formatter: (Double) -> String,
     includeLatest: Bool = true
 ) -> String {
-    guard let average = weeklyAverage(for: points), let latest = points.last?.value else {
+    guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
         return "Not enough recent data yet."
     }
 
@@ -760,7 +1026,7 @@ private func inverseWeeklyTrendSummary(
     formatter: (Double) -> String,
     includeLatest: Bool = true
 ) -> String {
-    guard let average = weeklyAverage(for: points), let latest = points.last?.value else {
+    guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
         return "Not enough recent data yet."
     }
 
@@ -784,8 +1050,8 @@ private func combinedEnergySummary(
         return "Not enough recent data yet."
     }
 
-    let latestSteps = steps.last?.value ?? avgSteps
-    let latestExercise = exerciseMinutes.last?.value ?? avgExercise
+    let latestSteps = latestMeaningfulPoint(in: steps)?.value ?? avgSteps
+    let latestExercise = latestMeaningfulPoint(in: exerciseMinutes)?.value ?? avgExercise
     let stepShift = latestSteps - avgSteps
     let exerciseShift = latestExercise - avgExercise
 
@@ -861,7 +1127,7 @@ struct AmbientSettingsView: View {
                 Text("Settings")
                     .font(.title2.weight(.semibold))
 
-                Text("Tune how quickly the mood read shifts. Lower settings make the app calmer and slower to change; higher settings make it react sooner.")
+                Text("Start with a mode, then only adjust the part that feels off. Each control below now changes one mood family more directly.")
                     .font(.body)
                     .foregroundStyle(.secondary)
 
@@ -869,50 +1135,65 @@ struct AmbientSettingsView: View {
                 // Intentionally grouped in Settings because it changes system behavior
                 DisclosureGroup(isExpanded: $showsSensitivitySection) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Start with a preset. If you open Advanced, each slider changes one kind of mood read and tells you what moving it left or right will do.")
+                        Text("Choose the overall feel first. Fine-tune only if one mood keeps showing up too often or not often enough.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
-                        Picker("Sensitivity Preset", selection: sensitivityPresetBinding) {
+                        HStack(spacing: 8) {
                             ForEach(AmbientHealthStore.SensitivityPreset.allCases.filter { $0 != .custom }) { preset in
-                                Text(preset.rawValue).tag(preset)
-                            }
-                            if healthStore.sensitivityPreset == .custom {
-                                Text(AmbientHealthStore.SensitivityPreset.custom.rawValue).tag(AmbientHealthStore.SensitivityPreset.custom)
+                                Button {
+                                    sensitivityPresetBinding.wrappedValue = preset
+                                } label: {
+                                    Text(preset.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(healthStore.sensitivityPreset == preset ? .primary : .secondary)
+                                        .padding(.horizontal, 12)
+                                        .frame(height: 32)
+                                        .background(
+                                            Capsule()
+                                                .fill(healthStore.sensitivityPreset == preset ? Color.white.opacity(0.64) : Color.white.opacity(0.14))
+                                        )
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .pickerStyle(.menu)
 
                         Text(presetDescription(for: healthStore.sensitivityPreset))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
+                        HStack(spacing: 8) {
+                            AmbientSensitivityHintChip(title: "Stress", detail: "Only changes Stressed")
+                            AmbientSensitivityHintChip(title: "Energy", detail: "Only changes Low Energy")
+                            AmbientSensitivityHintChip(title: "Sleep", detail: "Mostly changes Restored / Drained")
+                        }
+
                         DisclosureGroup("Advanced Sensitivity", isExpanded: $showsAdvancedSensitivity) {
                             VStack(spacing: 12) {
                                 AmbientSensitivitySlider(
-                                    title: "Stress Mood",
-                                    subtitle: "Use this if the app calls you stressed too easily, or not easily enough.",
+                                    title: "Stress Signals",
+                                    subtitle: "Only changes how easily the app shows Stressed from heart rate, HRV, breathing, and related strain signals.",
                                     lowLabel: "Harder to call stressed",
                                     highLabel: "Easier to call stressed",
                                     value: $stressSensitivity
                                 )
                                 AmbientSensitivitySlider(
-                                    title: "Low Energy Mood",
-                                    subtitle: "Use this if the app misses low-energy days tied to lower movement and exercise, or labels them too often.",
+                                    title: "Low Energy Signals",
+                                    subtitle: "Only changes how much lower movement and exercise can push the app toward Low Energy.",
                                     lowLabel: "Less likely to call low energy",
                                     highLabel: "More likely to call low energy",
                                     value: $movementSensitivity
                                 )
                                 AmbientSensitivitySlider(
-                                    title: "Rested or Drained",
-                                    subtitle: "Use this if sleep and recovery should matter less, or matter more, in the mood result.",
+                                    title: "Sleep + Recovery",
+                                    subtitle: "Mostly changes how strongly sleep and recovery can push the app toward Restored or Drained.",
                                     lowLabel: "Sleep matters less",
                                     highLabel: "Sleep matters more",
                                     value: $recoverySensitivity
                                 )
                                 AmbientSensitivitySlider(
-                                    title: "How Fast It Changes",
-                                    subtitle: "Use this if the whole mood read changes too quickly or feels too slow.",
+                                    title: "Overall Mood Speed",
+                                    subtitle: "A light global nudge. Leave this near the middle unless the whole app feels too jumpy or too muted.",
                                     lowLabel: "Changes more slowly",
                                     highLabel: "Changes more quickly",
                                     value: $overallResponsiveness
@@ -921,7 +1202,7 @@ struct AmbientSettingsView: View {
                             .padding(.top, 10)
                         }
 
-                        Text("Recommended is the easiest place to start. If the app still feels too dramatic, lower Stress Mood or How Fast It Changes first.")
+                        Text("Recommended is the best starting point. If the app feels random, leave Overall Mood Speed near the middle and adjust only one row at a time.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
@@ -929,15 +1210,19 @@ struct AmbientSettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
-                        Button {
-                            resetToDefault()
-                        } label: {
-                            Text("Use Recommended")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
+                        HStack {
+                            Spacer()
+
+                            Button {
+                                resetToDefault()
+                            } label: {
+                                Text("Use Recommended")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 32)
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
                     }
                     .padding(.top, 12)
                 } label: {
@@ -1033,18 +1318,18 @@ struct AmbientSettingsView: View {
     private func presetDescription(for preset: AmbientHealthStore.SensitivityPreset) -> String {
         switch preset {
         case .gentle:
-            return "This keeps the app calm. It needs clearer changes before it switches moods."
+            return "This holds onto the current mood longer and needs clearer evidence before it changes."
         case .recommended:
-            return "This is the balanced default. It usually will not jump moods from one odd reading."
+            return "This is the balanced mode. It should notice real shifts without jumping around."
         case .responsive:
-            return "This reacts faster. Good if you want the mood read to shift sooner."
+            return "This shifts sooner. Use it if the app still feels too muted after a few days."
         case .custom:
-            return "You changed the sliders yourself. This lets you decide what the app notices sooner or later."
+            return "You changed the sliders yourself. Each one now maps more directly to one part of the mood read."
         }
     }
 
     private var sensitivitySectionSummary: String {
-        "Current preset: \(healthStore.sensitivityPreset.rawValue). Expand to fine-tune how calm or reactive the mood read feels."
+        "Current mode: \(healthStore.sensitivityPreset.rawValue). Expand to tune stress, energy, sleep, and overall mood speed."
     }
 
     private var healthKitSectionSummary: String {
@@ -1078,9 +1363,12 @@ private struct AmbientSensitivitySlider: View {
 
                 Spacer()
 
-                Text("\(Int(value * 100))%")
-                    .font(.subheadline)
+                Text(levelLabel)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(Color.white.opacity(0.10), in: Capsule())
             }
 
             Text(subtitle)
@@ -1088,7 +1376,7 @@ private struct AmbientSensitivitySlider: View {
                 .foregroundStyle(.secondary)
 
             Slider(value: $value, in: 0...1)
-                .tint(.blue)
+                .tint(Color(red: 0.49, green: 0.72, blue: 0.96))
 
             HStack {
                 Text(lowLabel)
@@ -1099,7 +1387,53 @@ private struct AmbientSensitivitySlider: View {
             .foregroundStyle(.secondary)
         }
         .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.14),
+                    Color(red: 0.49, green: 0.72, blue: 0.96).opacity(0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+    }
+
+    private var levelLabel: String {
+        switch value {
+        case ..<0.30:
+            return "Low"
+        case ..<0.45:
+            return "Soft"
+        case ..<0.62:
+            return "Balanced"
+        case ..<0.78:
+            return "Active"
+        default:
+            return "High"
+        }
+    }
+}
+
+private struct AmbientSensitivityHintChip: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

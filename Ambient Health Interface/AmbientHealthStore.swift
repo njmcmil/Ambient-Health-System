@@ -17,10 +17,10 @@ import HealthKit
 final class AmbientHealthStore: ObservableObject {
     // These defaults are tuned for my current Apple Watch SE 3-oriented signal mix; subject to change
     struct SensitivityProfile {
-        var stress: Double = 0.72
-        var movement: Double = 0.48
-        var recovery: Double = 0.68
-        var overall: Double = 0.58
+        var stress: Double = 0.78
+        var movement: Double = 0.52
+        var recovery: Double = 0.72
+        var overall: Double = 0.64
 
         static let `default` = SensitivityProfile()
     }
@@ -36,11 +36,11 @@ final class AmbientHealthStore: ObservableObject {
         var profile: SensitivityProfile {
             switch self {
             case .gentle:
-                return .init(stress: 0.52, movement: 0.38, recovery: 0.56, overall: 0.45)
+                return .init(stress: 0.58, movement: 0.42, recovery: 0.60, overall: 0.50)
             case .recommended:
                 return .default
             case .responsive:
-                return .init(stress: 0.84, movement: 0.64, recovery: 0.80, overall: 0.72)
+                return .init(stress: 0.88, movement: 0.68, recovery: 0.84, overall: 0.76)
             case .custom:
                 return .default
             }
@@ -368,13 +368,32 @@ final class AmbientHealthStore: ObservableObject {
         }
     }
 
-    func updateSensitivityProfile(_ profile: SensitivityProfile) {
+    func refreshIfNeeded() async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        guard authorizationState == .authorized || authorizationState == .partial else { return }
+        guard !isRefreshing else { return }
+
+        let snapshotAge = latestSnapshot.map { Date().timeIntervalSince($0.sampledAt) } ?? .infinity
+        let missingCoreSignals = [
+            latestSnapshot?.restingHeartRate == nil,
+            latestSnapshot?.heartRateVariability == nil,
+            latestSnapshot?.sleepHours == nil && latestSnapshot?.sleepStages == nil
+        ]
+        .filter { $0 }
+        .count
+
+        if latestSnapshot == nil || snapshotAge > 60 * 20 || missingCoreSignals >= 2 {
+            await refresh()
+        }
+    }
+
+    func updateSensitivityProfile(_ profile: SensitivityProfile, shouldSendToPi: Bool = true) {
         sensitivityProfile = profile
         sensitivityPreset = preset(matching: profile)
 
         // Re-run classification immediately so slider changes affect the live ambient state.
         guard let latestSnapshot else { return }
-        setState(classify(snapshot: latestSnapshot, baseline: baselineSummary), shouldSendToPi: true)
+        setState(classify(snapshot: latestSnapshot, baseline: baselineSummary), shouldSendToPi: shouldSendToPi)
     }
 
     func applySensitivityPreset(_ preset: SensitivityPreset) {
@@ -423,6 +442,8 @@ final class AmbientHealthStore: ObservableObject {
     }
 
     private func setState(_ newState: ColorHealthState, shouldSendToPi: Bool) {
+        guard newState != currentState else { return }
+
         currentState = newState
         history.append(newState)
 
@@ -464,8 +485,8 @@ final class AmbientHealthStore: ObservableObject {
         let movementWeight = normalizedSensitivity(profile.movement, overall: profile.overall)
         let recoveryWeight = normalizedSensitivity(profile.recovery, overall: profile.overall)
 
-        let moderateStressThreshold = interpolate(low: 1.6, high: 1.05, factor: stressWeight)
-        let strongStressThreshold = interpolate(low: 2.4, high: 1.65, factor: stressWeight)
+        let moderateStressThreshold = interpolate(low: 1.45, high: 0.98, factor: stressWeight)
+        let strongStressThreshold = interpolate(low: 2.15, high: 1.50, factor: stressWeight)
         let moderateRecoveryThreshold = interpolate(low: 1.45, high: 0.95, factor: recoveryWeight)
         let strongRecoveryThreshold = interpolate(low: 2.15, high: 1.45, factor: recoveryWeight)
         let moderateMovementThreshold = interpolate(low: 0.95, high: 0.65, factor: movementWeight)
@@ -500,10 +521,10 @@ final class AmbientHealthStore: ObservableObject {
 
         // Fallback stress markers are only used when the app does not have enough baseline history yet.
         let fallbackStressSignals = [
-            restingHeartRate >= interpolate(low: 88, high: 80, factor: stressWeight),
-            heartRateVariability <= interpolate(low: 22, high: 30, factor: stressWeight),
-            respiratoryRate >= interpolate(low: 19.5, high: 17.5, factor: stressWeight),
-            currentHeartRate >= interpolate(low: 108, high: 98, factor: stressWeight) && steps < 2_500 && exerciseMinutes < 12
+            restingHeartRate >= interpolate(low: 86, high: 78, factor: stressWeight),
+            heartRateVariability <= interpolate(low: 26, high: 33, factor: stressWeight),
+            respiratoryRate >= interpolate(low: 19.0, high: 17.2, factor: stressWeight),
+            currentHeartRate >= interpolate(low: 104, high: 96, factor: stressWeight) && steps < 2_500 && exerciseMinutes < 12
         ].filter { $0 }.count
 
         // Workouts should only mute stress briefly while exercise physiology is still dominating
@@ -531,8 +552,13 @@ final class AmbientHealthStore: ObservableObject {
             sleepDebt >= strongStressThreshold
         ].filter { $0 }.count
 
+        let layeredStressLoad = [restingStrain, hrvStrain, respiratoryStrain, max(sleepDebt, awakeStrain)]
+            .sorted(by: >)
+            .prefix(2)
+            .reduce(0, +)
+
         let stressElevated = baselineReliability >= 2
-            ? baselineStressSignals >= 2
+            ? (baselineStressSignals >= 2 || layeredStressLoad >= moderateStressThreshold * 1.8)
             : fallbackStressSignals >= 2
 
         // Recovery support tracks the opposite side of the picture: is the body looking more restored
@@ -607,16 +633,22 @@ final class AmbientHealthStore: ObservableObject {
             || strongStressSignals >= 3
             || (temperatureStrain && strongStressSignals >= 2)
             || (recoveryWeak && stressElevated && respiratoryStrain >= strongStressThreshold)
+        let stressedMoodScore = restingStrain + hrvStrain + respiratoryStrain + max(sleepDebt, awakeStrain)
+        let drainedMoodScore = sleepDebt + deepSleepDebt + remSleepDebt + awakeStrain + (hrvStrain * 0.7) + (restingStrain * 0.45)
+        let recoveryPatternDominant = drainedMoodScore >= stressedMoodScore + 0.45
+        let drainSignalCount = [sleepDebt, deepSleepDebt, remSleepDebt, awakeStrain]
+            .filter { $0 >= moderateRecoveryThreshold }
+            .count
         let moderateStrain = oxygenConcern
-            || (recoveryWeak && (stressElevated || temperatureStrain))
-            || strongStressSignals >= 2
+            || (drainSignalCount >= 2 && (recoveryWeak || temperatureStrain))
+            || (strongStressSignals >= 2 && recoveryPatternDominant)
 
         // State ordering matters. Severe states now require corroboration across signals.
         if severeStrain && !workoutExplainsCardioStrain {
             return .red
         }
 
-        if moderateStrain && !workoutExplainsCardioStrain {
+        if moderateStrain && !workoutExplainsCardioStrain && (!stressElevated || recoveryPatternDominant) {
             return .orange
         }
 
@@ -649,22 +681,26 @@ final class AmbientHealthStore: ObservableObject {
         async let flightsClimbed = totalQuantityToday(for: .flightsClimbed, unit: .count())
         async let currentHeartRate = latestQuantityValue(
             for: .heartRate,
-            unit: HKUnit.count().unitDivided(by: .minute())
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            maxAgeHours: 6
         )
         async let restingHeartRate = latestQuantityValue(
             for: .restingHeartRate,
-            unit: HKUnit.count().unitDivided(by: .minute())
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            maxAgeHours: 36
         )
         async let heartRateVariability = latestQuantityValue(
             for: .heartRateVariabilitySDNN,
-            unit: HKUnit.secondUnit(with: .milli)
+            unit: HKUnit.secondUnit(with: .milli),
+            maxAgeHours: 36
         )
         async let respiratoryRate = latestQuantityValue(
             for: .respiratoryRate,
-            unit: HKUnit.count().unitDivided(by: .minute())
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            maxAgeHours: 36
         )
-        async let oxygenSaturation = latestQuantityValue(for: .oxygenSaturation, unit: .percent())
-        async let wristTemperature = latestQuantityValue(for: .appleSleepingWristTemperature, unit: .degreeCelsius())
+        async let oxygenSaturation = latestQuantityValue(for: .oxygenSaturation, unit: .percent(), maxAgeHours: 36)
+        async let wristTemperature = latestQuantityValue(for: .appleSleepingWristTemperature, unit: .degreeCelsius(), maxAgeHours: 48)
         async let sleepHours = sleepHoursSinceYesterdayEvening()
         async let sleepStages = sleepStageBreakdownSinceYesterdayEvening()
         async let mindfulMinutes = categoryDurationToday(for: .mindfulSession)
@@ -1078,7 +1114,8 @@ final class AmbientHealthStore: ObservableObject {
 
     private func latestQuantityValue(
         for identifier: HKQuantityTypeIdentifier,
-        unit: HKUnit
+        unit: HKUnit,
+        maxAgeHours: Double? = nil
     ) async throws -> Double? {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else {
             return nil
@@ -1103,8 +1140,15 @@ final class AmbientHealthStore: ObservableObject {
                 }
 
                 let sample = samples?.first as? HKQuantitySample
+                if let maxAgeHours,
+                   let sample,
+                   Date().timeIntervalSince(sample.endDate) > maxAgeHours * 3600 {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
                 let value = sample?.quantity.doubleValue(for: unit)
-                continuation.resume(returning: value)
+                continuation.resume(returning: (value ?? 0) > 0 ? value : nil)
             }
 
             healthStore.execute(query)
@@ -1388,7 +1432,8 @@ final class AmbientHealthStore: ObservableObject {
     }
 
     private func normalizedSensitivity(_ sliderValue: Double, overall: Double) -> Double {
-        min(max((sliderValue * 0.7) + (overall * 0.3), 0), 1)
+        // Keep the dedicated sliders mostly independent so users can predict what each one changes.
+        min(max((sliderValue * 0.88) + (overall * 0.12), 0), 1)
     }
 
     private func interpolate(low: Double, high: Double, factor: Double) -> Double {

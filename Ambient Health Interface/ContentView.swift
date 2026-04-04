@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct AmbientHealthObjectView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var healthStore = AmbientHealthStore()
     @State private var selectedTab: AmbientTab = .now
+    @State private var sensitivityApplyTask: Task<Void, Never>?
 
     @State private var stressSensitivity: Double = AmbientHealthStore.SensitivityProfile.default.stress
     @State private var movementSensitivity: Double = AmbientHealthStore.SensitivityProfile.default.movement
@@ -44,10 +46,16 @@ struct AmbientHealthObjectView: View {
                 .padding(.bottom, 10)
         }
         .onAppear(perform: applySensitivityProfile)
-        .onChange(of: stressSensitivity) { applySensitivityProfile() }
-        .onChange(of: movementSensitivity) { applySensitivityProfile() }
-        .onChange(of: recoverySensitivity) { applySensitivityProfile() }
-        .onChange(of: overallResponsiveness) { applySensitivityProfile() }
+        .onChange(of: stressSensitivity) { scheduleSensitivityApply() }
+        .onChange(of: movementSensitivity) { scheduleSensitivityApply() }
+        .onChange(of: recoverySensitivity) { scheduleSensitivityApply() }
+        .onChange(of: overallResponsiveness) { scheduleSensitivityApply() }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task {
+                await healthStore.refreshIfNeeded()
+            }
+        }
     }
 
     private func resetSensitivityToDefault() {
@@ -65,8 +73,19 @@ struct AmbientHealthObjectView: View {
                 movement: movementSensitivity,
                 recovery: recoverySensitivity,
                 overall: overallResponsiveness
-            )
+            ),
+            shouldSendToPi: true
         )
+    }
+
+    private func scheduleSensitivityApply() {
+        sensitivityApplyTask?.cancel()
+        sensitivityApplyTask = Task {
+            // Let slider drags settle before we reclassify and push a new light state.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            applySensitivityProfile()
+        }
     }
 }
 
