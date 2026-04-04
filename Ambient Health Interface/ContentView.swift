@@ -3,6 +3,7 @@ import SwiftUI
 struct AmbientHealthObjectView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var healthStore = AmbientHealthStore()
+    @AppStorage("anxietyCalmerMode") private var calmerModeEnabled = false
     @State private var selectedTab: AmbientTab = .now
     @State private var sensitivityApplyTask: Task<Void, Never>?
 
@@ -13,13 +14,19 @@ struct AmbientHealthObjectView: View {
 
     var body: some View {
         ZStack {
-            AmbientBackgroundView(state: healthStore.currentState)
+            AmbientBackgroundView(
+                state: healthStore.displayedState,
+                reduceIntensity: calmerModeEnabled
+            )
 
             // Keep the shell small here and push feature-specific UI into dedicated files.
             Group {
                 switch selectedTab {
                 case .now:
-                    AmbientNowView(healthStore: healthStore)
+                    AmbientNowView(
+                        healthStore: healthStore,
+                        reduceIntensity: calmerModeEnabled
+                    )
                 case .trends:
                     AmbientTrendsView(healthStore: healthStore)
                 case .explanation:
@@ -31,6 +38,7 @@ struct AmbientHealthObjectView: View {
                         movementSensitivity: $movementSensitivity,
                         recoverySensitivity: $recoverySensitivity,
                         overallResponsiveness: $overallResponsiveness,
+                        calmerModeEnabled: $calmerModeEnabled,
                         resetToDefault: resetSensitivityToDefault
                     )
                 }

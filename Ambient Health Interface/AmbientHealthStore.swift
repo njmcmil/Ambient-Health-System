@@ -239,6 +239,7 @@ final class AmbientHealthStore: ObservableObject {
     }
 
     @Published private(set) var currentState: ColorHealthState = .gray
+    @Published private(set) var previewState: ColorHealthState?
     @Published private(set) var history: [ColorHealthState] = []
     @Published private(set) var authorizationState: AuthorizationState
     @Published private(set) var latestSnapshot: Snapshot?
@@ -250,6 +251,10 @@ final class AmbientHealthStore: ObservableObject {
     @Published private(set) var signalEntries: [HealthSignalEntry] = []
 
     let healthStore = HKHealthStore()
+
+    var displayedState: ColorHealthState {
+        previewState ?? currentState
+    }
 
     // Keep read types centralized so authorization and refresh stay in sync.
     private let healthTypes: Set<HKObjectType> = {
@@ -405,6 +410,18 @@ final class AmbientHealthStore: ObservableObject {
         setState(classify(snapshot: latestSnapshot, baseline: baselineSummary), shouldSendToPi: true)
     }
 
+    func setPreviewState(_ state: ColorHealthState?) {
+        previewState = state
+        if let state {
+            // Preview temporarily drives the ambient object so the user can test the room/device
+            // without mutating the actual live classification.
+            PiController.shared.sendHealthState(state)
+        } else {
+            // Leaving preview restores the true live state.
+            PiController.shared.sendHealthState(currentState)
+        }
+    }
+
     private func refreshAuthorizationState() async {
         guard HKHealthStore.isHealthDataAvailable() else {
             authorizationState = .unavailable
@@ -452,7 +469,7 @@ final class AmbientHealthStore: ObservableObject {
             history.removeFirst()
         }
 
-        if shouldSendToPi {
+        if shouldSendToPi && previewState == nil {
             PiController.shared.sendHealthState(newState)
         }
     }

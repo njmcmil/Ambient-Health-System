@@ -17,87 +17,87 @@ extension ColorHealthState {
         switch self {
         case .blue:
             return .init(
-                intensity: 0.08,
-                angularity: 0.50,
-                breatheAmplitude: 0.010,
-                breatheSpeed: 0.70,
-                rotationAmplitude: 1.2,
-                rotationSpeed: 0.16,
-                scanSpeed: 0.70,
-                glowOpacity: 0.10,
-                staticAmount: 0.01
+                intensity: 0.10,
+                angularity: 0.54,
+                breatheAmplitude: 0.012,
+                breatheSpeed: 0.78,
+                rotationAmplitude: 1.6,
+                rotationSpeed: 0.18,
+                scanSpeed: 0.82,
+                glowOpacity: 0.11,
+                staticAmount: 0.012
             )
         case .green:
             return .init(
-                intensity: 0.10,
-                angularity: 0.58,
-                breatheAmplitude: 0.012,
-                breatheSpeed: 0.82,
-                rotationAmplitude: 1.5,
-                rotationSpeed: 0.18,
-                scanSpeed: 0.85,
-                glowOpacity: 0.11,
-                staticAmount: 0.015
+                intensity: 0.12,
+                angularity: 0.62,
+                breatheAmplitude: 0.014,
+                breatheSpeed: 0.90,
+                rotationAmplitude: 1.9,
+                rotationSpeed: 0.20,
+                scanSpeed: 0.96,
+                glowOpacity: 0.12,
+                staticAmount: 0.017
             )
         case .gray:
             return .init(
-                intensity: 0.06,
-                angularity: 0.42,
-                breatheAmplitude: 0.008,
-                breatheSpeed: 0.55,
-                rotationAmplitude: 0.9,
-                rotationSpeed: 0.12,
-                scanSpeed: 0.55,
-                glowOpacity: 0.07,
-                staticAmount: 0.008
+                intensity: 0.08,
+                angularity: 0.46,
+                breatheAmplitude: 0.010,
+                breatheSpeed: 0.64,
+                rotationAmplitude: 1.1,
+                rotationSpeed: 0.14,
+                scanSpeed: 0.66,
+                glowOpacity: 0.09,
+                staticAmount: 0.010
             )
         case .yellow:
             return .init(
-                intensity: 0.14,
-                angularity: 0.70,
-                breatheAmplitude: 0.014,
-                breatheSpeed: 0.95,
-                rotationAmplitude: 1.8,
-                rotationSpeed: 0.21,
-                scanSpeed: 1.05,
-                glowOpacity: 0.12,
-                staticAmount: 0.02
+                intensity: 0.17,
+                angularity: 0.76,
+                breatheAmplitude: 0.016,
+                breatheSpeed: 1.06,
+                rotationAmplitude: 2.2,
+                rotationSpeed: 0.23,
+                scanSpeed: 1.16,
+                glowOpacity: 0.13,
+                staticAmount: 0.024
             )
         case .orange:
             return .init(
-                intensity: 0.18,
-                angularity: 0.82,
-                breatheAmplitude: 0.016,
-                breatheSpeed: 1.08,
-                rotationAmplitude: 2.1,
-                rotationSpeed: 0.24,
-                scanSpeed: 1.18,
-                glowOpacity: 0.13,
-                staticAmount: 0.025
+                intensity: 0.22,
+                angularity: 0.88,
+                breatheAmplitude: 0.014,
+                breatheSpeed: 0.94,
+                rotationAmplitude: 1.8,
+                rotationSpeed: 0.20,
+                scanSpeed: 1.02,
+                glowOpacity: 0.14,
+                staticAmount: 0.028
             )
         case .purple:
             return .init(
-                intensity: 0.22,
-                angularity: 0.92,
-                breatheAmplitude: 0.018,
-                breatheSpeed: 1.18,
-                rotationAmplitude: 2.4,
-                rotationSpeed: 0.27,
-                scanSpeed: 1.30,
-                glowOpacity: 0.14,
-                staticAmount: 0.03
+                intensity: 0.27,
+                angularity: 0.98,
+                breatheAmplitude: 0.020,
+                breatheSpeed: 1.30,
+                rotationAmplitude: 2.8,
+                rotationSpeed: 0.29,
+                scanSpeed: 1.40,
+                glowOpacity: 0.15,
+                staticAmount: 0.035
             )
         case .red:
             return .init(
-                intensity: 0.26,
-                angularity: 1.02,
-                breatheAmplitude: 0.020,
-                breatheSpeed: 1.32,
-                rotationAmplitude: 2.8,
-                rotationSpeed: 0.30,
-                scanSpeed: 1.45,
-                glowOpacity: 0.16,
-                staticAmount: 0.04
+                intensity: 0.35,
+                angularity: 1.14,
+                breatheAmplitude: 0.024,
+                breatheSpeed: 1.62,
+                rotationAmplitude: 3.8,
+                rotationSpeed: 0.38,
+                scanSpeed: 1.72,
+                glowOpacity: 0.18,
+                staticAmount: 0.052
             )
         }
     }

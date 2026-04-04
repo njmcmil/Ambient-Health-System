@@ -5,34 +5,47 @@ import SwiftUI
 
 struct AmbientTrendsView: View {
     @ObservedObject var healthStore: AmbientHealthStore
+    @AppStorage("anxietyCalmerMode") private var calmerModeEnabled = false
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Trends")
                     .font(.title2.weight(.semibold))
 
-                Text("A simple weekly read on the signals most connected to your current mood state.")
-                    .font(.body)
+                Text("A lighter weekly view of the signals behind your current mood read.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                if let trendReport = healthStore.trendReport {
-                    // Trends are intentionally trimmed down to the few views that help explain mood,
-                    // instead of trying to expose every raw signal the store knows about.
-                    AmbientWeeklySummaryCard(
-                        trendReport: trendReport,
-                        currentState: healthStore.currentState
+                if let previewState = healthStore.previewState {
+                    AmbientPreviewStateCard(
+                        state: previewState,
+                        calmerModeEnabled: calmerModeEnabled
                     )
-                    AmbientHRVTrendCard(points: trendReport.heartRateVariability)
-                    AmbientHeartTrendCard(
-                        points: trendReport.restingHeartRate
-                    )
-                    AmbientEnergyRhythmCard(
-                        steps: trendReport.steps,
-                        exerciseMinutes: trendReport.exerciseMinutes
-                    )
-                    AmbientSleepDurationCard(points: trendReport.sleepHours)
-                    AmbientSleepQualitySummaryCard(points: trendReport.sleepStages)
+                } else if let trendReport = healthStore.trendReport {
+                    if calmerModeEnabled {
+                        AmbientCalmerTrendsView(
+                            trendReport: trendReport,
+                            currentState: healthStore.displayedState
+                        )
+                    } else {
+                        // Trends are intentionally trimmed down to the few views that help explain mood,
+                        // instead of trying to expose every raw signal the store knows about.
+                        AmbientWeeklySummaryCard(
+                            trendReport: trendReport,
+                            currentState: healthStore.displayedState
+                        )
+                        AmbientHRVTrendCard(points: trendReport.heartRateVariability)
+                        AmbientHeartTrendCard(
+                            points: trendReport.restingHeartRate
+                        )
+                        AmbientEnergyRhythmCard(
+                            steps: trendReport.steps,
+                            exerciseMinutes: trendReport.exerciseMinutes
+                        )
+                        AmbientSleepDurationCard(points: trendReport.sleepHours)
+                        AmbientSleepQualitySummaryCard(points: trendReport.sleepStages)
+                    }
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("No trend data yet")
@@ -43,7 +56,7 @@ struct AmbientTrendsView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(18)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .ambientPanel(tint: Color.white)
                 }
             }
             .padding(.bottom, 40)
@@ -53,6 +66,7 @@ struct AmbientTrendsView: View {
 
 struct AmbientExplanationView: View {
     @ObservedObject var healthStore: AmbientHealthStore
+    @AppStorage("anxietyCalmerMode") private var calmerModeEnabled = false
 
     var body: some View {
         ScrollView {
@@ -64,16 +78,23 @@ struct AmbientExplanationView: View {
                     // A small visual marker helps the current state read faster without turning the
                     // explanation cards into a dense icon-heavy dashboard.
                     AmbientSectionHeader(
-                        title: healthStore.currentState.title,
-                        symbol: symbolForState(healthStore.currentState),
-                        tint: healthStore.currentState.color
+                        title: healthStore.displayedState.title,
+                        symbol: symbolForState(healthStore.displayedState),
+                        tint: healthStore.displayedState.color
                     )
 
-                    if !explanationSignalChips(snapshot: healthStore.latestSnapshot).isEmpty {
+                    let chips = healthStore.previewState.map(previewSignalChips(for:)) ?? explanationSignalChips(snapshot: healthStore.latestSnapshot)
+                    if !calmerModeEnabled, !chips.isEmpty {
                         AmbientExplanationSignalRow(
-                            chips: explanationSignalChips(snapshot: healthStore.latestSnapshot),
-                            tint: healthStore.currentState.color
+                            chips: chips,
+                            tint: healthStore.displayedState.color
                         )
+                    }
+
+                    if healthStore.previewState != nil {
+                        Text("Preview mode is on. This page is showing an example read for the selected state, not your live health interpretation.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(18)
@@ -86,7 +107,9 @@ struct AmbientExplanationView: View {
                         tint: Color(red: 0.49, green: 0.72, blue: 0.96)
                     )
 
-                    ForEach(explanationBullets(for: healthStore.currentState, snapshot: healthStore.latestSnapshot), id: \.self) { bullet in
+                    let bullets = explanationBulletContent
+
+                    ForEach(bullets, id: \.self) { bullet in
                         HStack(alignment: .top, spacing: 10) {
                             Circle()
                                 .fill(Color(red: 0.72, green: 0.77, blue: 0.82).opacity(0.95))
@@ -107,20 +130,20 @@ struct AmbientExplanationView: View {
                         HStack(alignment: .center) {
                             AmbientSectionHeader(
                                 title: "Pattern Insight",
-                                symbol: "circle.hexagongrid.fill",
+                                symbol: "text.magnifyingglass",
                                 tint: Color(red: 0.49, green: 0.72, blue: 0.96)
                             )
 
                             Spacer()
 
-                            AmbientInsightHistoryTrail(history: healthStore.history)
+                            AmbientInsightHistoryTrail(history: historyTrail)
                         }
 
-                        Text(patternInsight(for: healthStore.currentState, snapshot: healthStore.latestSnapshot))
+                        Text(patternInsightText)
                             .font(.body.weight(.medium))
                             .foregroundStyle(.primary)
 
-                        Text("Based on recent health patterns and how they compare to your usual rhythm.")
+                        Text(patternInsightCaption)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -130,6 +153,157 @@ struct AmbientExplanationView: View {
             }
             .padding(.bottom, 40)
         }
+    }
+
+    private var historyTrail: [ColorHealthState] {
+        if let previewState = healthStore.previewState {
+            return Array(repeating: previewState, count: max(healthStore.history.count, 6))
+        }
+        return healthStore.history
+    }
+
+    private var explanationBulletContent: [String] {
+        if let previewState = healthStore.previewState {
+            return calmerModeEnabled
+                ? calmerGenericExplanationBullets(for: previewState)
+                : genericExplanationBullets(for: previewState)
+        }
+
+        return calmerModeEnabled
+            ? calmerExplanationBullets(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
+            : explanationBullets(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
+    }
+
+    private var patternInsightText: String {
+        if let previewState = healthStore.previewState {
+            return calmerModeEnabled
+                ? calmerPatternInsight(for: previewState, snapshot: nil)
+                : patternInsight(for: previewState, snapshot: nil)
+        }
+
+        return calmerModeEnabled
+            ? calmerPatternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
+            : patternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
+    }
+
+    private var patternInsightCaption: String {
+        if healthStore.previewState != nil {
+            return calmerModeEnabled
+                ? "A gentler example of how this state can show up."
+                : "A plain-language read on how this state usually feels in the app."
+        }
+
+        return calmerModeEnabled
+            ? "A softer explanation based on your recent pattern and your usual rhythm."
+            : "Based on recent health patterns and how they compare to your usual rhythm."
+    }
+}
+
+private struct AmbientCalmerTrendsView: View {
+    let trendReport: AmbientHealthStore.TrendReport
+    let currentState: ColorHealthState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            AmbientCalmerTrendNoteCard(
+                title: currentState.title,
+                detail: calmerSummaryLine(for: currentState),
+                tint: currentState.color
+            )
+
+            AmbientCalmerTrendNoteCard(
+                title: "Recovery",
+                detail: calmerWeeklyTrendSummary(
+                    points: trendReport.heartRateVariability,
+                    lowMeaning: "Recovery looks a little softer than your recent norm.",
+                    highMeaning: "Recovery looks a little stronger than your recent norm.",
+                    unit: "ms",
+                    formatter: { Int($0).formatted() },
+                    includeLatest: false
+                ),
+                tint: .teal
+            )
+
+            AmbientCalmerTrendNoteCard(
+                title: "Resting Rhythm",
+                detail: calmerInverseWeeklyTrendSummary(
+                    points: trendReport.restingHeartRate,
+                    lowMeaning: "Your system looks a little calmer than your recent norm.",
+                    highMeaning: "Your system looks a little more activated than your recent norm.",
+                    unit: "bpm",
+                    formatter: { Int($0).formatted() },
+                    includeLatest: false
+                ),
+                tint: Color(red: 1.0, green: 0.20, blue: 0.22)
+            )
+
+            AmbientCalmerTrendNoteCard(
+                title: "Movement",
+                detail: calmerEnergySummary(
+                    steps: trendReport.steps,
+                    exerciseMinutes: trendReport.exerciseMinutes
+                ),
+                tint: .green
+            )
+
+            AmbientCalmerTrendNoteCard(
+                title: "Sleep",
+                detail: calmerWeeklyTrendSummary(
+                    points: trendReport.sleepHours,
+                    lowMeaning: "Sleep looks a little lighter than your recent norm.",
+                    highMeaning: "Sleep looks a little fuller than your recent norm.",
+                    unit: "h",
+                    formatter: { String(format: "%.1f", $0) },
+                    includeLatest: false
+                ),
+                tint: Color(red: 0.73, green: 0.56, blue: 0.88)
+            )
+
+            AmbientCalmerTrendNoteCard(
+                title: "Sleep Quality",
+                detail: calmerSleepStageSummary(points: trendReport.sleepStages),
+                tint: .blue
+            )
+        }
+    }
+}
+
+private struct AmbientCalmerTrendNoteCard: View {
+    let title: String
+    let detail: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text(detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .ambientPanel(tint: tint)
+    }
+}
+
+private func calmerSummaryLine(for state: ColorHealthState) -> String {
+    switch state {
+    case .blue:
+        return "Your current pattern looks a little more restored and supported than usual."
+    case .green:
+        return "Your current pattern looks steady and relatively well supported."
+    case .yellow:
+        return "Your current pattern looks quieter and lower-energy than usual."
+    case .purple:
+        return "Your current pattern looks a little more activated than your usual baseline."
+    case .gray:
+        return "Your current pattern looks close to baseline."
+    case .red:
+        return "Your current pattern looks more intense, with several signals pulling in the same direction."
+    case .orange:
+        return "Your current pattern looks more worn down than activated."
     }
 }
 
@@ -191,6 +365,34 @@ private struct AmbientWeeklySummaryCard: View {
     }
 }
 
+private struct AmbientPreviewStateCard: View {
+    let state: ColorHealthState
+    let calmerModeEnabled: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            AmbientCardHeader(title: "Preview Mode", symbol: symbolForState(state), tint: state.color)
+
+            Text("You are previewing \(state.title.lowercased()). Trends are showing an example interpretation instead of your live weekly summary.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if !calmerModeEnabled {
+                AmbientExplanationSignalRow(
+                    chips: previewSignalChips(for: state),
+                    tint: state.color
+                )
+            }
+
+            Text(calmerModeEnabled ? calmerStateExampleScenario(for: state) : patternInsight(for: state, snapshot: nil))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
 private struct AmbientSummaryRow: View {
     let title: String
     let detail: String
@@ -215,7 +417,7 @@ private struct AmbientEnergyRhythmCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Energy Rhythm", symbol: "figure.walk.motion", tint: .green)
 
-            Text("A simple weekly picture of your general momentum, using steps and exercise together.")
+            Text("A quick read on weekly movement and momentum.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -230,7 +432,7 @@ private struct AmbientEnergyRhythmCard: View {
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            let displayPoints = meaningfulTrendPoints(steps)
+            let displayPoints = Array(meaningfulTrendPoints(steps).suffix(5))
             let exerciseMap = Dictionary(uniqueKeysWithValues: exerciseMinutes.map { ($0.date, $0.value) })
 
             if !displayPoints.isEmpty {
@@ -255,8 +457,8 @@ private struct AmbientEnergyRhythmCard: View {
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color.green.opacity(0.22 + (0.18 * intensity)),
-                                                Color.green.opacity(0.05)
+                                                Color.green.opacity(0.18 + (0.14 * intensity)),
+                                                Color.green.opacity(0.035)
                                             ],
                                             startPoint: .top,
                                             endPoint: .bottom
@@ -268,8 +470,8 @@ private struct AmbientEnergyRhythmCard: View {
                                             .fill(
                                                 RadialGradient(
                                                     colors: [
-                                                        Color.green.opacity(0.32 + (0.16 * intensity)),
-                                                        Color.green.opacity(0.12),
+                                                        Color.green.opacity(0.24 + (0.12 * intensity)),
+                                                        Color.green.opacity(0.08),
                                                         .clear
                                                     ],
                                                     center: .center,
@@ -318,8 +520,8 @@ private struct AmbientEnergyRhythmCard: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.06),
-                                    Color.green.opacity(0.05)
+                                    Color.white.opacity(0.04),
+                                    Color.green.opacity(0.035)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -332,8 +534,8 @@ private struct AmbientEnergyRhythmCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .ambientPanel(tint: .green)
     }
 
     private func energyIntensity(
@@ -383,11 +585,11 @@ private struct AmbientHRVTrendCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Heart Rate Variability", symbol: "waveform.path.ecg", tint: .teal)
 
-            Text("A softer read on recovery, steadiness, and tension across the week.")
+            Text("A softer read on recovery and tension through the week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            let displayPoints = meaningfulTrendPoints(points)
+            let displayPoints = Array(meaningfulTrendPoints(points).suffix(5))
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 6) {
@@ -404,8 +606,8 @@ private struct AmbientHRVTrendCard: View {
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color.teal.opacity(0.22 + (0.18 * intensity)),
-                                                Color.teal.opacity(0.05)
+                                                Color.teal.opacity(0.18 + (0.14 * intensity)),
+                                                Color.teal.opacity(0.035)
                                             ],
                                             startPoint: .top,
                                             endPoint: .bottom
@@ -418,7 +620,7 @@ private struct AmbientHRVTrendCard: View {
                                     }
                                     .background {
                                         Capsule(style: .continuous)
-                                            .fill(Color.teal.opacity(0.16))
+                                            .fill(Color.teal.opacity(0.11))
                                             .frame(width: haloWidth, height: max(28, pulseHeight + 10))
                                             .blur(radius: 10)
                                     }
@@ -451,8 +653,8 @@ private struct AmbientHRVTrendCard: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.06),
-                                    Color.teal.opacity(0.05)
+                                    Color.white.opacity(0.04),
+                                    Color.teal.opacity(0.035)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -476,8 +678,8 @@ private struct AmbientHRVTrendCard: View {
             .font(.footnote)
                 .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .ambientPanel(tint: .teal)
     }
 
     private func normalizedValue(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
@@ -506,11 +708,11 @@ private struct AmbientSleepDurationCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Sleep Duration", symbol: "bed.double.fill", tint: tint)
 
-            Text("A quiet weekly picture of how much sleep has been landing each night.")
+            Text("A quiet weekly picture of how much sleep has landed each night.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            let displayPoints = meaningfulTrendPoints(points)
+            let displayPoints = Array(meaningfulTrendPoints(points).suffix(5))
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 6) {
@@ -528,8 +730,8 @@ private struct AmbientSleepDurationCard: View {
                                     .fill(
                                         RadialGradient(
                                             colors: [
-                                                tint.opacity(0.22 + (0.14 * intensity)),
-                                                tint.opacity(0.08),
+                                                tint.opacity(0.18 + (0.10 * intensity)),
+                                                tint.opacity(0.06),
                                                 .clear
                                             ],
                                             center: .center,
@@ -572,8 +774,8 @@ private struct AmbientSleepDurationCard: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.06),
-                                    tint.opacity(0.05)
+                                    Color.white.opacity(0.04),
+                                    tint.opacity(0.035)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -597,8 +799,8 @@ private struct AmbientSleepDurationCard: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .ambientPanel(tint: tint)
     }
 
     private func normalizedValue(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
@@ -633,11 +835,11 @@ private struct AmbientHeartTrendCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Resting Heart Rate", symbol: "heart.fill", tint: Color(red: 1.0, green: 0.20, blue: 0.22))
 
-            Text("A softer view of whether your system has looked calmer or more activated over the last week.")
+            Text("A softer view of whether your system has looked calmer or more activated.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            let displayPoints = meaningfulTrendPoints(points)
+            let displayPoints = Array(meaningfulTrendPoints(points).suffix(5))
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 4) {
@@ -655,8 +857,8 @@ private struct AmbientHeartTrendCard: View {
                                     .fill(
                                         RadialGradient(
                                             colors: [
-                                                glowColor.opacity(0.30 + (0.18 * intensity)),
-                                                glowColor.opacity(0.12 + (0.10 * intensity)),
+                                                glowColor.opacity(0.24 + (0.12 * intensity)),
+                                                glowColor.opacity(0.08 + (0.06 * intensity)),
                                                 .clear
                                             ],
                                             center: .center,
@@ -668,7 +870,7 @@ private struct AmbientHeartTrendCard: View {
                                     .blur(radius: 7)
 
                                 Circle()
-                                    .fill(Color.white.opacity(0.06))
+                                    .fill(Color.white.opacity(0.04))
                                     .frame(width: max(20, heartSize * 1.55), height: max(20, heartSize * 1.55))
 
                                 Image(systemName: "heart.fill")
@@ -699,8 +901,8 @@ private struct AmbientHeartTrendCard: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.06),
-                                    Color(red: 1.0, green: 0.16, blue: 0.18).opacity(0.05)
+                                    Color.white.opacity(0.04),
+                                    Color(red: 1.0, green: 0.16, blue: 0.18).opacity(0.035)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -724,8 +926,8 @@ private struct AmbientHeartTrendCard: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .ambientPanel(tint: Color(red: 1.0, green: 0.20, blue: 0.22))
     }
 
     private func normalizedIntensity(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
@@ -826,16 +1028,16 @@ private struct AmbientCardHeader: View {
         HStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(tint.opacity(0.14))
-                    .frame(width: 24, height: 24)
+                    .fill(tint.opacity(0.11))
+                    .frame(width: 22, height: 22)
                     .overlay {
                         Circle()
-                            .fill(tint.opacity(0.08))
-                            .blur(radius: 6)
+                            .fill(tint.opacity(0.05))
+                            .blur(radius: 5)
                     }
 
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(tint.opacity(0.92))
             }
 
@@ -1018,6 +1220,28 @@ private func weeklyTrendSummary(
     }
 }
 
+private func calmerWeeklyTrendSummary(
+    points: [AmbientHealthStore.TrendPoint],
+    lowMeaning: String,
+    highMeaning: String,
+    unit: String,
+    formatter: (Double) -> String,
+    includeLatest: Bool = true
+) -> String {
+    guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
+        return "There is not enough recent data to describe this gently yet."
+    }
+
+    let delta = latest - average
+    if abs(delta) < max(average * 0.08, unit == "h" ? 0.35 : 2) {
+        return "This part of the week looks fairly steady."
+    } else if delta > 0 {
+        return highMeaning
+    } else {
+        return lowMeaning
+    }
+}
+
 private func inverseWeeklyTrendSummary(
     points: [AmbientHealthStore.TrendPoint],
     lowMeaning: String,
@@ -1042,6 +1266,28 @@ private func inverseWeeklyTrendSummary(
     }
 }
 
+private func calmerInverseWeeklyTrendSummary(
+    points: [AmbientHealthStore.TrendPoint],
+    lowMeaning: String,
+    highMeaning: String,
+    unit: String,
+    formatter: (Double) -> String,
+    includeLatest: Bool = true
+) -> String {
+    guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
+        return "There is not enough recent data to describe this gently yet."
+    }
+
+    let delta = latest - average
+    if abs(delta) < max(average * 0.06, 2) {
+        return "This part of the week looks fairly steady."
+    } else if delta > 0 {
+        return highMeaning
+    } else {
+        return lowMeaning
+    }
+}
+
 private func combinedEnergySummary(
     steps: [AmbientHealthStore.TrendPoint],
     exerciseMinutes: [AmbientHealthStore.TrendPoint]
@@ -1061,6 +1307,28 @@ private func combinedEnergySummary(
         return "Your recent energy rhythm looks softer than your weekly norm."
     } else {
         return "Your recent energy rhythm looks pretty consistent with the rest of the week."
+    }
+}
+
+private func calmerEnergySummary(
+    steps: [AmbientHealthStore.TrendPoint],
+    exerciseMinutes: [AmbientHealthStore.TrendPoint]
+) -> String {
+    guard let avgSteps = weeklyAverage(for: steps), let avgExercise = weeklyAverage(for: exerciseMinutes) else {
+        return "There is not enough recent data to describe movement gently yet."
+    }
+
+    let latestSteps = latestMeaningfulPoint(in: steps)?.value ?? avgSteps
+    let latestExercise = latestMeaningfulPoint(in: exerciseMinutes)?.value ?? avgExercise
+    let stepShift = latestSteps - avgSteps
+    let exerciseShift = latestExercise - avgExercise
+
+    if stepShift > max(avgSteps * 0.12, 900) || exerciseShift > max(avgExercise * 0.18, 8) {
+        return "Movement looks a little more present than your recent norm."
+    } else if stepShift < -max(avgSteps * 0.12, 900) || exerciseShift < -max(avgExercise * 0.18, 8) {
+        return "Movement looks a little quieter than your recent norm."
+    } else {
+        return "Movement looks fairly consistent with the rest of the week."
     }
 }
 
@@ -1093,6 +1361,35 @@ private func sleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]
     return "Sleep quality looks mixed this week: not especially poor, but not strongly restorative either."
 }
 
+private func calmerSleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> String {
+    guard !points.isEmpty else {
+        return "There is not enough recent sleep-stage data to describe this gently yet."
+    }
+
+    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent) }.reduce(0, +) / Double(points.count)
+    let averageDeep = points.map(\.deepPercent).reduce(0, +) / Double(points.count)
+    let averageREM = points.map(\.remPercent).reduce(0, +) / Double(points.count)
+    let averageAwake = points.map(\.awakePercent).reduce(0, +) / Double(points.count)
+
+    if averageDeep >= 15, averageREM >= 19, averageAwake <= 11 {
+        return "Sleep quality looks fairly supportive this week."
+    }
+
+    if averageAwake >= 14 {
+        return "Sleep quality looks a little more interrupted this week."
+    }
+
+    if averageDeep < 11 || averageREM < 16 {
+        return "Sleep quality looks a little lighter than usual this week."
+    }
+
+    if averageCore >= 66 {
+        return "Sleep looks a little more core-heavy this week, which can feel less restorative."
+    }
+
+    return "Sleep quality looks mixed, but not strongly pulled in one direction."
+}
+
 private struct AmbientInsightHistoryTrail: View {
     let history: [ColorHealthState]
 
@@ -1116,127 +1413,143 @@ struct AmbientSettingsView: View {
     @Binding var movementSensitivity: Double
     @Binding var recoverySensitivity: Double
     @Binding var overallResponsiveness: Double
+    @Binding var calmerModeEnabled: Bool
     let resetToDefault: () -> Void
-    @State private var showsSensitivitySection = true
+    @State private var showsAccessibilitySection = false
     @State private var showsHealthKitSection = false
-    @State private var showsAdvancedSensitivity = false
+    @State private var showsStatePreviewSection = false
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Settings")
-                    .font(.title2.weight(.semibold))
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Settings")
+                        .font(.title2.weight(.semibold))
+
+                    Spacer()
+
+                    Label("Scroll for more", systemImage: "arrow.up.and.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
 
                 Text("Start with a mode, then only adjust the part that feels off. Each control below now changes one mood family more directly.")
-                    .font(.body)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                // Sensitivity changes how strongly the classifier reacts to HealthKit values.
-                // Intentionally grouped in Settings because it changes system behavior
-                DisclosureGroup(isExpanded: $showsSensitivitySection) {
+                AmbientSensitivityControlCard(
+                    preset: sensitivityPresetBinding,
+                    selectedPreset: healthStore.sensitivityPreset,
+                    stressSensitivity: $stressSensitivity,
+                    movementSensitivity: $movementSensitivity,
+                    recoverySensitivity: $recoverySensitivity,
+                    overallResponsiveness: $overallResponsiveness,
+                    presetDescription: presetDescription(for: healthStore.sensitivityPreset),
+                    resetToDefault: resetToDefault
+                )
+
+                DisclosureGroup(isExpanded: $showsAccessibilitySection) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Choose the overall feel first. Fine-tune only if one mood keeps showing up too often or not often enough.")
+                        Text("Use this if bright glows, fast motion, or agitated states feel like too much. It softens the visual layer without changing your actual health state or the mood logic underneath.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
-                        HStack(spacing: 8) {
-                            ForEach(AmbientHealthStore.SensitivityPreset.allCases.filter { $0 != .custom }) { preset in
+                        AmbientAccessibilityToggleCard(
+                            title: "Calmer Mode",
+                            subtitle: "Reduce glow, motion, and visual intensity across the app.",
+                            isOn: $calmerModeEnabled
+                        )
+
+                        Text(calmerModeEnabled
+                             ? "Calmer Mode is on. The app keeps the same health read, but tones down the aura, motion, and stronger distressed visuals."
+                             : "Calmer Mode is off. The app uses its full ambient motion and brightness range.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Accessibility")
+                            .font(.headline)
+
+                        Text(calmerModeEnabled
+                             ? "Calmer Mode is on. The app is using a softer visual presentation."
+                             : "Expand for a lower-intensity visual mode that is easier to look at during anxious moments.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(18)
+                .ambientPanel(tint: Color(red: 0.49, green: 0.72, blue: 0.96))
+
+                DisclosureGroup(isExpanded: $showsStatePreviewSection) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Preview a mood state on the phone and read the kind of health pattern that would usually create it. This does not change live data or send a fake state out.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
+                            ForEach(ColorHealthState.allCases) { state in
                                 Button {
-                                    sensitivityPresetBinding.wrappedValue = preset
+                                    healthStore.setPreviewState(healthStore.previewState == state ? nil : state)
                                 } label: {
-                                    Text(preset.rawValue)
+                                    Text(state.title)
                                         .font(.caption.weight(.semibold))
-                                        .foregroundStyle(healthStore.sensitivityPreset == preset ? .primary : .secondary)
+                                        .foregroundStyle(healthStore.previewState == state ? .primary : .secondary)
                                         .padding(.horizontal, 12)
-                                        .frame(height: 32)
+                                        .frame(height: 34)
+                                        .frame(maxWidth: .infinity)
                                         .background(
-                                            Capsule()
-                                                .fill(healthStore.sensitivityPreset == preset ? Color.white.opacity(0.64) : Color.white.opacity(0.14))
+                                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                .fill(healthStore.previewState == state ? state.color.opacity(0.22) : Color.white.opacity(0.08))
                                         )
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
 
-                        Text(presetDescription(for: healthStore.sensitivityPreset))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        if let previewState = healthStore.previewState {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(previewState.color)
+                                        .frame(width: 8, height: 8)
 
-                        HStack(spacing: 8) {
-                            AmbientSensitivityHintChip(title: "Stress", detail: "Only changes Stressed")
-                            AmbientSensitivityHintChip(title: "Energy", detail: "Only changes Low Energy")
-                            AmbientSensitivityHintChip(title: "Sleep", detail: "Mostly changes Restored / Drained")
-                        }
+                                    Text("Previewing \(previewState.title)")
+                                        .font(.subheadline.weight(.semibold))
+                                }
 
-                        DisclosureGroup("Advanced Sensitivity", isExpanded: $showsAdvancedSensitivity) {
-                            VStack(spacing: 12) {
-                                AmbientSensitivitySlider(
-                                    title: "Stress Signals",
-                                    subtitle: "Only changes how easily the app shows Stressed from heart rate, HRV, breathing, and related strain signals.",
-                                    lowLabel: "Harder to call stressed",
-                                    highLabel: "Easier to call stressed",
-                                    value: $stressSensitivity
-                                )
-                                AmbientSensitivitySlider(
-                                    title: "Low Energy Signals",
-                                    subtitle: "Only changes how much lower movement and exercise can push the app toward Low Energy.",
-                                    lowLabel: "Less likely to call low energy",
-                                    highLabel: "More likely to call low energy",
-                                    value: $movementSensitivity
-                                )
-                                AmbientSensitivitySlider(
-                                    title: "Sleep + Recovery",
-                                    subtitle: "Mostly changes how strongly sleep and recovery can push the app toward Restored or Drained.",
-                                    lowLabel: "Sleep matters less",
-                                    highLabel: "Sleep matters more",
-                                    value: $recoverySensitivity
-                                )
-                                AmbientSensitivitySlider(
-                                    title: "Overall Mood Speed",
-                                    subtitle: "A light global nudge. Leave this near the middle unless the whole app feels too jumpy or too muted.",
-                                    lowLabel: "Changes more slowly",
-                                    highLabel: "Changes more quickly",
-                                    value: $overallResponsiveness
-                                )
+                                Text(calmerModeEnabled ? calmerStateExampleScenario(for: previewState) : patternInsight(for: previewState, snapshot: nil))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                
+
+                                Text(sensitivityEffectLine(for: previewState, profile: healthStore.sensitivityProfile))
+                                    .font(.footnote.weight(.medium))
+                                    .foregroundStyle(.primary.opacity(0.88))
+
+                                Button("Return to Live State") {
+                                    healthStore.setPreviewState(nil)
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .padding(.top, 10)
-                        }
-
-                        Text("Recommended is the best starting point. If the app feels random, leave Overall Mood Speed near the middle and adjust only one row at a time.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
-                        Text("Workout-aware stress handling is on. The app softens stress detection during an active workout and a short recovery window after, so exercise does not get mistaken for emotional stress.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
-                        HStack {
-                            Spacer()
-
-                            Button {
-                                resetToDefault()
-                            } label: {
-                                Text("Use Recommended")
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 12)
-                                    .frame(height: 32)
-                            }
-                            .buttonStyle(.bordered)
+                            .padding(14)
+                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
                     }
                     .padding(.top, 12)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Sensitivity")
+                        Text("State Preview")
                             .font(.headline)
 
-                        Text(sensitivitySectionSummary)
+                        Text(healthStore.previewState == nil ? "Expand to test how each mood state looks and read an example health pattern for it." : "Previewing \(healthStore.previewState?.title ?? "").")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(18)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .ambientPanel(tint: healthStore.previewState?.color ?? Color(red: 0.49, green: 0.72, blue: 0.96))
 
                 // HealthKit status lives here so operational/debug information stays out of the more atmospheric home screen
                 DisclosureGroup(isExpanded: $showsHealthKitSection) {
@@ -1294,10 +1607,12 @@ struct AmbientSettingsView: View {
                     }
                 }
                 .padding(18)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .ambientPanel(tint: Color.white)
             }
-            .padding(.bottom, 40)
+            .padding(.bottom, 140)
         }
+        .scrollIndicators(.visible)
+        .safeAreaPadding(.bottom, 8)
     }
 
     private var sensitivityPresetBinding: Binding<AmbientHealthStore.SensitivityPreset> {
@@ -1328,10 +1643,6 @@ struct AmbientSettingsView: View {
         }
     }
 
-    private var sensitivitySectionSummary: String {
-        "Current mode: \(healthStore.sensitivityPreset.rawValue). Expand to tune stress, energy, sleep, and overall mood speed."
-    }
-
     private var healthKitSectionSummary: String {
         "\(healthStore.authorizationState.title). Expand to inspect available signals and connection details."
     }
@@ -1348,56 +1659,194 @@ struct AmbientSettingsView: View {
     }
 }
 
-private struct AmbientSensitivitySlider: View {
+private struct AmbientSensitivityControlCard: View {
+    @Binding var preset: AmbientHealthStore.SensitivityPreset
+    let selectedPreset: AmbientHealthStore.SensitivityPreset
+    @Binding var stressSensitivity: Double
+    @Binding var movementSensitivity: Double
+    @Binding var recoverySensitivity: Double
+    @Binding var overallResponsiveness: Double
+    let presetDescription: String
+    let resetToDefault: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sensitivity")
+                        .font(.headline)
+
+                    Text("Move a slider up if you want that mood to show more easily. Move it down if the app is calling it too often.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    resetToDefault()
+                } label: {
+                    Text("Recommended")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(AmbientHealthStore.SensitivityPreset.allCases.filter { $0 != .custom }) { item in
+                    Button {
+                        preset = item
+                    } label: {
+                        Text(item.rawValue)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(selectedPreset == item ? .primary : .secondary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 30)
+                            .background(
+                                Capsule()
+                                    .fill(selectedPreset == item ? Color.white.opacity(0.58) : Color.white.opacity(0.10))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(presetDescription)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 10) {
+                AmbientVerticalSensitivitySlider(
+                    title: "Stressed",
+                    subtitle: "Stress",
+                    tint: ColorHealthState.purple.color,
+                    lowLabel: "Harder",
+                    highLabel: "Easier",
+                    value: $stressSensitivity
+                )
+                AmbientVerticalSensitivitySlider(
+                    title: "Low Energy",
+                    subtitle: "Movement",
+                    tint: ColorHealthState.yellow.color,
+                    lowLabel: "Harder",
+                    highLabel: "Easier",
+                    value: $movementSensitivity
+                )
+                AmbientVerticalSensitivitySlider(
+                    title: "Restored\nDrained",
+                    subtitle: "Recovery",
+                    tint: ColorHealthState.orange.color,
+                    secondaryTint: ColorHealthState.blue.color,
+                    lowLabel: "Less",
+                    highLabel: "More",
+                    value: $recoverySensitivity
+                )
+                AmbientVerticalSensitivitySlider(
+                    title: "Whole App\nChanges",
+                    subtitle: "Speed",
+                    tint: Color(red: 0.49, green: 0.72, blue: 0.96),
+                    lowLabel: "Slower",
+                    highLabel: "Faster",
+                    value: $overallResponsiveness
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            Text("Workout-aware stress handling is still on. Exercise only softens stress reads during active workouts and a short recovery window after.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .ambientPanel(tint: Color(red: 0.49, green: 0.72, blue: 0.96))
+    }
+}
+
+private struct AmbientAccessibilityToggleCard: View {
     let title: String
     let subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.headline)
+
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .tint(Color(red: 0.49, green: 0.72, blue: 0.96))
+        }
+        .padding(16)
+        .ambientSubpanel(tint: Color(red: 0.49, green: 0.72, blue: 0.96))
+    }
+}
+
+private struct AmbientVerticalSensitivitySlider: View {
+    let title: String
+    let subtitle: String
+    let tint: Color
+    var secondaryTint: Color? = nil
     let lowLabel: String
     let highLabel: String
     @Binding var value: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title)
-                    .font(.headline)
+        VStack(spacing: 10) {
+            Text(subtitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(height: 16)
 
-                Spacer()
+            ZStack {
+                VStack(spacing: 0) {
+                    Text(highLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 68, height: 16)
+
+                    Spacer(minLength: 0)
+
+                    Text(lowLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 68, height: 16)
+                }
+                .frame(width: 68, height: 224)
+
+                Slider(value: $value, in: 0...1)
+                    .tint(sliderTint)
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 126, height: 28)
+            }
+            .frame(width: 68, height: 224)
+
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .frame(height: 34)
 
                 Text(levelLabel)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .frame(height: 24)
-                    .background(Color.white.opacity(0.10), in: Capsule())
+                    .frame(height: 14)
             }
-
-            Text(subtitle)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Slider(value: $value, in: 0...1)
-                .tint(Color(red: 0.49, green: 0.72, blue: 0.96))
-
-            HStack {
-                Text(lowLabel)
-                Spacer()
-                Text(highLabel)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .frame(width: 68)
         }
-        .padding(16)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.14),
-                    Color(red: 0.49, green: 0.72, blue: 0.96).opacity(0.06)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-        )
+        .frame(width: 68, alignment: .top)
+    }
+
+    private var sliderTint: Color {
+        tint.opacity(0.42 + (min(max(value, 0), 1) * 0.58))
     }
 
     private var levelLabel: String {
@@ -1416,24 +1865,63 @@ private struct AmbientSensitivitySlider: View {
     }
 }
 
-private struct AmbientSensitivityHintChip: View {
-    let title: String
-    let detail: String
+private struct AmbientPanelModifier: ViewModifier {
+    let tint: Color
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.15),
+                                tint.opacity(0.040)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.9)
+                    )
+            )
+    }
+}
 
-            Text(detail)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+private struct AmbientSubpanelModifier: ViewModifier {
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.12),
+                                tint.opacity(0.05)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.white.opacity(0.07), lineWidth: 0.8)
+                    )
+            )
+    }
+}
+
+private extension View {
+    func ambientPanel(tint: Color) -> some View {
+        modifier(AmbientPanelModifier(tint: tint))
+    }
+
+    func ambientSubpanel(tint: Color) -> some View {
+        modifier(AmbientSubpanelModifier(tint: tint))
     }
 }
 

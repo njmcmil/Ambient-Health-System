@@ -2,6 +2,9 @@ import SwiftUI
 
 struct AmbientBackgroundView: View {
     let state: ColorHealthState
+    let reduceIntensity: Bool
+
+    private var auraFactor: Double { reduceIntensity ? 0.62 : 1.0 }
 
     var body: some View {
         ZStack {
@@ -9,7 +12,7 @@ struct AmbientBackgroundView: View {
                 colors: [
                     Color(uiColor: .systemBackground),
                     Color(uiColor: .secondarySystemBackground).opacity(0.99),
-                    state.color.opacity(0.018)
+                    state.color.opacity(0.018 * auraFactor)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -17,21 +20,21 @@ struct AmbientBackgroundView: View {
             .ignoresSafeArea()
 
             Circle()
-                .fill(state.color.opacity(0.06))
+                .fill(state.color.opacity(0.06 * auraFactor))
                 .frame(width: 310, height: 310)
-                .blur(radius: 64)
+                .blur(radius: reduceIntensity ? 54 : 64)
                 .offset(x: -18, y: -156)
 
             Circle()
-                .fill(Color.white.opacity(0.035))
+                .fill(Color.white.opacity(reduceIntensity ? 0.020 : 0.035))
                 .frame(width: 190, height: 190)
-                .blur(radius: 42)
+                .blur(radius: reduceIntensity ? 34 : 42)
                 .offset(x: 90, y: -186)
 
             Ellipse()
-                .fill(state.color.opacity(0.028))
+                .fill(state.color.opacity(0.028 * auraFactor))
                 .frame(width: 360, height: 190)
-                .blur(radius: 76)
+                .blur(radius: reduceIntensity ? 62 : 76)
                 .offset(x: 60, y: 292)
         }
     }
@@ -39,6 +42,7 @@ struct AmbientBackgroundView: View {
 
 struct AmbientNowView: View {
     @ObservedObject var healthStore: AmbientHealthStore
+    let reduceIntensity: Bool
 
     var body: some View {
         // Keep *Now* intentionally sparse so the object remains the primary readout.
@@ -47,16 +51,28 @@ struct AmbientNowView: View {
 
             AmbientNowCalendarCard(healthStore: healthStore)
             Spacer(minLength: 10)
-            AmbientReferenceView(state: healthStore.currentState)
+            AmbientReferenceView(
+                state: healthStore.displayedState,
+                reduceIntensity: reduceIntensity
+            )
                 .padding(.top, 8)
 
             VStack(spacing: 8) {
-                Text(healthStore.currentState.title)
+                Text(healthStore.displayedState.title)
                     .font(.system(size: 28, weight: .medium, design: .rounded))
                     .tracking(0.2)
                     .foregroundStyle(.primary)
 
-                Text(nowLine(for: healthStore.currentState))
+                if healthStore.previewState != nil {
+                    Text("Preview Mode")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(healthStore.displayedState.color.opacity(0.9))
+                        .padding(.horizontal, 10)
+                        .frame(height: 24)
+                        .background(healthStore.displayedState.color.opacity(0.12), in: Capsule())
+                }
+
+                Text(nowLine(for: healthStore.displayedState))
                     .font(.callout)
                     .lineSpacing(2)
                     .foregroundStyle(.secondary)
@@ -77,6 +93,7 @@ struct AmbientNowView: View {
 
 private struct AmbientNowCalendarCard: View {
     @ObservedObject var healthStore: AmbientHealthStore
+    @ObservedObject private var piController = PiController.shared
 
     private let calendar = Calendar.current
 
@@ -97,13 +114,16 @@ private struct AmbientNowCalendarCard: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
+                    AmbientConnectionIndicator(status: piController.connectionStatus)
+                    .padding(.bottom, 3)
+
                     Text("Today")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    Text(healthStore.currentState.title)
+                    Text(healthStore.displayedState.title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(healthStore.currentState.color)
+                        .foregroundStyle(healthStore.displayedState.color)
                 }
             }
 
@@ -122,8 +142,8 @@ private struct AmbientNowCalendarCard: View {
                                 if isToday {
                                     // Today's wheel shows the flow of states through the day, not just a single summary color.
                                     AmbientStateWheel(
-                                        points: healthStore.trendReport?.intradayStateTrail ?? [
-                                            AmbientHealthStore.StateTrendPoint(date: Date(), state: healthStore.currentState)
+                                        points: previewWheelPoints ?? healthStore.trendReport?.intradayStateTrail ?? [
+                                            AmbientHealthStore.StateTrendPoint(date: Date(), state: healthStore.displayedState)
                                         ]
                                     )
                                         .frame(width: 30, height: 30)
@@ -168,7 +188,7 @@ private struct AmbientNowCalendarCard: View {
             colors: [
                 Color.white.opacity(0.18),
                 Color.white.opacity(0.10),
-                healthStore.currentState.color.opacity(0.03)
+                healthStore.displayedState.color.opacity(0.03)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -209,26 +229,91 @@ private struct AmbientNowCalendarCard: View {
     }
 
     private func color(for date: Date) -> Color {
+        if let previewState = healthStore.previewState {
+            return previewState.color
+        }
+
         // Non-today circles stay day-based so the week row reads as a broader rhythm, not another detailed-day chart.
         if let trendPoint = healthStore.trendReport?.stateTrail.first(where: { calendar.isDate($0.date, inSameDayAs: date) }) {
             return trendPoint.state.color
         }
 
         if calendar.isDateInToday(date) {
-            return healthStore.currentState.color
+            return healthStore.displayedState.color
         }
 
         return Color.white
     }
 
     private var todayWheelAccentColor: Color {
+        if let previewState = healthStore.previewState {
+            return previewState.color
+        }
+
         guard let points = healthStore.trendReport?.intradayStateTrail, !points.isEmpty else {
-            return healthStore.currentState.color
+            return healthStore.displayedState.color
         }
 
         // Match the outer ring to the most recent state in today's wheel so the day marker
         // does not look split between two unrelated moods.
-        return points.last?.state.color ?? healthStore.currentState.color
+        return points.last?.state.color ?? healthStore.displayedState.color
+    }
+
+    private var previewWheelPoints: [AmbientHealthStore.StateTrendPoint]? {
+        guard let previewState = healthStore.previewState else { return nil }
+        return (0..<6).map { index in
+            AmbientHealthStore.StateTrendPoint(
+                date: Calendar.current.date(byAdding: .hour, value: index * 3, to: Date()) ?? Date(),
+                state: previewState
+            )
+        }
+    }
+}
+
+private struct AmbientConnectionIndicator: View {
+    let status: PiController.ConnectionStatus
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(indicatorColor.opacity(0.92))
+                .frame(width: 7, height: 7)
+                .overlay {
+                    Circle()
+                        .stroke(indicatorColor.opacity(status == .sending ? 0.55 : 0.40), lineWidth: 3)
+                        .blur(radius: 1)
+                }
+
+            Image(systemName: indicatorSymbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(indicatorColor.opacity(0.88))
+        }
+    }
+
+    private var indicatorColor: Color {
+        switch status {
+        case .idle:
+            return Color(red: 0.70, green: 0.77, blue: 0.84)
+        case .sending:
+            return Color(red: 0.91, green: 0.73, blue: 0.42)
+        case .online:
+            return .green
+        case .offline:
+            return Color(red: 0.92, green: 0.42, blue: 0.44)
+        }
+    }
+
+    private var indicatorSymbol: String {
+        switch status {
+        case .idle:
+            return "circle.dotted"
+        case .sending:
+            return "dot.radiowaves.up.forward"
+        case .online:
+            return "dot.radiowaves.up.forward"
+        case .offline:
+            return "bolt.slash.fill"
+        }
     }
 }
 

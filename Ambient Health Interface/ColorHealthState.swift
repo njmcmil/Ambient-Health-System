@@ -35,6 +35,25 @@ enum ColorHealthState: String, CaseIterable, Identifiable {
         }
     }
 
+    var ambientBrightness: Int {
+        switch self {
+        case .gray:
+            return 4
+        case .blue:
+            return 3
+        case .green:
+            return 5
+        case .yellow:
+            return 8
+        case .red:
+            return 3
+        case .purple:
+            return 8
+        case .orange:
+            return 6
+        }
+    }
+
     var message: String {
         switch self {
         case .blue:
