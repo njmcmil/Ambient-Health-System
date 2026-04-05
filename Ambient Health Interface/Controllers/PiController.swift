@@ -2,9 +2,13 @@ import Foundation
 import Combine
 
 @MainActor
+/// Manages communication with the ambient hardware bridge and exposes a small,
+/// UI-friendly connection state for the Now screen.
 final class PiController: ObservableObject {
     static let shared = PiController()
 
+    /// Mirrors the health of the last known connection attempt in a way that
+    /// the UI can translate into a simple status indicator.
     enum ConnectionStatus {
         case idle
         case checking
@@ -35,7 +39,7 @@ final class PiController: ObservableObject {
     }
 
     func refreshConnectionStatus() async {
-        guard let url = URL(string: baseURL) else {
+        guard let url = URL(string: "\(baseURL)/set_light") else {
             connectionStatus = .offline
             return
         }
@@ -43,22 +47,33 @@ final class PiController: ObservableObject {
         connectionStatus = .checking
 
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        // Probe the actual bridge route without attempting to change the light.
+        request.httpMethod = "OPTIONS"
         request.timeoutInterval = 4
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            if response is HTTPURLResponse {
-                connectionStatus = .online
-            } else {
+            guard response is HTTPURLResponse else {
                 connectionStatus = .offline
+                return
             }
+            // A real HTTP response means the bridge route is reachable, even if
+            // that particular method is not supported.
+            connectionStatus = .online
         } catch {
             connectionStatus = .offline
         }
     }
 
     func sendHealthState(_ state: ColorHealthState, brightness: Int? = nil) {
+        sendHealthState(state, brightness: brightness, retryingAfterServerFailure: false)
+    }
+
+    private func sendHealthState(
+        _ state: ColorHealthState,
+        brightness: Int?,
+        retryingAfterServerFailure: Bool
+    ) {
         guard let url = URL(string: "\(baseURL)/set_light") else {
             print("Invalid baseURL:", baseURL)
             return
@@ -96,6 +111,17 @@ final class PiController: ObservableObject {
                 print("Sent \(state.rawValue) @ \(resolvedBrightness)% — Status: \(httpResponse.statusCode)")
                 Task { @MainActor in
                     self.connectionStatus = (200..<300).contains(httpResponse.statusCode) ? .online : .offline
+                }
+
+                if (500...599).contains(httpResponse.statusCode), !retryingAfterServerFailure {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        self.sendHealthState(
+                            state,
+                            brightness: resolvedBrightness,
+                            retryingAfterServerFailure: true
+                        )
+                    }
                 }
             }
         }.resume()

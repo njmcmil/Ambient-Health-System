@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// Hosts the app's top-level ambient experience and keeps shared state
+/// flowing between the current mood view, explanation screens, trends,
+/// settings, and the ambient object connection layer.
 struct AmbientHealthObjectView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var healthStore = AmbientHealthStore()
@@ -20,7 +23,6 @@ struct AmbientHealthObjectView: View {
                 reduceIntensity: calmerModeEnabled
             )
 
-            // Keep the shell small here and push feature-specific UI into dedicated files.
             Group {
                 switch selectedTab {
                 case .now:
@@ -58,12 +60,20 @@ struct AmbientHealthObjectView: View {
             applySensitivityProfile()
             piController.startMonitoring()
         }
-        .onChange(of: stressSensitivity) { scheduleSensitivityApply() }
-        .onChange(of: movementSensitivity) { scheduleSensitivityApply() }
-        .onChange(of: recoverySensitivity) { scheduleSensitivityApply() }
-        .onChange(of: overallResponsiveness) { scheduleSensitivityApply() }
-        .onChange(of: scenePhase) { phase in
-            guard phase == .active else { return }
+        .onChange(of: stressSensitivity) {
+            scheduleSensitivityApply()
+        }
+        .onChange(of: movementSensitivity) {
+            scheduleSensitivityApply()
+        }
+        .onChange(of: recoverySensitivity) {
+            scheduleSensitivityApply()
+        }
+        .onChange(of: overallResponsiveness) {
+            scheduleSensitivityApply()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
             Task {
                 await healthStore.refreshIfNeeded()
                 await piController.refreshConnectionStatus()
@@ -94,14 +104,9 @@ struct AmbientHealthObjectView: View {
     private func scheduleSensitivityApply() {
         sensitivityApplyTask?.cancel()
         sensitivityApplyTask = Task {
-            // Let slider drags settle before we reclassify and push a new light state.
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
             applySensitivityProfile()
         }
     }
-}
-
-#Preview {
-    AmbientHealthObjectView()
 }

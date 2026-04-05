@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// Renders the living ambient object that visually mirrors the current state.
+/// The goal is not literal data visualization, but a readable mood presence that
+/// still reacts differently across calmer and more distressed states.
 struct AmbientReferenceView: View {
     let state: ColorHealthState
     let reduceIntensity: Bool
