@@ -10,6 +10,9 @@ struct AmbientSettingsView: View {
     @Binding var recoverySensitivity: Double
     @Binding var overallResponsiveness: Double
     @Binding var calmerModeEnabled: Bool
+    @Binding var reduceMotionEnabled: Bool
+    @Binding var largerTextEnabled: Bool
+    @Binding var higherContrastEnabled: Bool
     let resetToDefault: () -> Void
     @State private var showsAccessibilitySection = false
     @State private var showsHealthKitSection = false
@@ -57,11 +60,35 @@ struct AmbientSettingsView: View {
                             isOn: $calmerModeEnabled
                         )
 
+                        AmbientAccessibilityToggleCard(
+                            title: "Reduce Motion",
+                            subtitle: "Minimize movement and animated transitions while keeping the same data and mood logic.",
+                            isOn: $reduceMotionEnabled
+                        )
+
+                        AmbientAccessibilityToggleCard(
+                            title: "Larger Text",
+                            subtitle: "Use larger type across screens for easier reading.",
+                            isOn: $largerTextEnabled
+                        )
+
+                        AmbientAccessibilityToggleCard(
+                            title: "Higher Contrast",
+                            subtitle: "Increase visual contrast so labels and cards are easier to distinguish.",
+                            isOn: $higherContrastEnabled
+                        )
+
                         Text(calmerModeEnabled
                              ? "Calmer Mode is on. The app keeps the same health read, but tones down the aura, motion, and stronger distressed visuals."
                              : "Calmer Mode is off. The app uses its full ambient motion and brightness range.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+
+                        if reduceMotionEnabled || largerTextEnabled || higherContrastEnabled {
+                            Text("Extra accessibility options are active. These only change presentation, not your health-state analysis.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.top, 12)
                 } label: {
@@ -69,9 +96,7 @@ struct AmbientSettingsView: View {
                         Text("Accessibility")
                             .font(.headline)
 
-                        Text(calmerModeEnabled
-                             ? "Calmer Mode is on. The app is using a softer visual presentation."
-                             : "Expand for a lower-intensity visual mode that is easier to look at during anxious moments.")
+                        Text(accessibilitySummaryLine)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -239,6 +264,20 @@ struct AmbientSettingsView: View {
 
     private var healthKitSectionSummary: String {
         "\(healthStore.authorizationState.title). Expand to inspect available signals and connection details."
+    }
+
+    private var accessibilitySummaryLine: String {
+        var enabled: [String] = []
+        if calmerModeEnabled { enabled.append("Calmer Mode") }
+        if reduceMotionEnabled { enabled.append("Reduce Motion") }
+        if largerTextEnabled { enabled.append("Larger Text") }
+        if higherContrastEnabled { enabled.append("Higher Contrast") }
+
+        if enabled.isEmpty {
+            return "Expand for visual accessibility options that make the app easier to read and process."
+        }
+
+        return "Active: \(enabled.joined(separator: ", "))"
     }
 
     private func statusColor(for status: AmbientHealthStore.HealthSignalStatus) -> Color {

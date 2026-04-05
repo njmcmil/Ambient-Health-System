@@ -8,6 +8,9 @@ struct AmbientHealthObjectView: View {
     @StateObject private var healthStore = AmbientHealthStore()
     @StateObject private var piController = PiController.shared
     @AppStorage("anxietyCalmerMode") private var calmerModeEnabled = false
+    @AppStorage("accessibilityReduceMotion") private var reduceMotionEnabled = false
+    @AppStorage("accessibilityLargerText") private var largerTextEnabled = false
+    @AppStorage("accessibilityHigherContrast") private var higherContrastEnabled = false
     @State private var selectedTab: AmbientTab = .now
     @State private var sensitivityApplyTask: Task<Void, Never>?
 
@@ -20,7 +23,7 @@ struct AmbientHealthObjectView: View {
         ZStack {
             AmbientBackgroundView(
                 state: healthStore.displayedState,
-                reduceIntensity: calmerModeEnabled
+                reduceIntensity: calmerModeEnabled || reduceMotionEnabled
             )
 
             Group {
@@ -28,7 +31,7 @@ struct AmbientHealthObjectView: View {
                 case .now:
                     AmbientNowView(
                         healthStore: healthStore,
-                        reduceIntensity: calmerModeEnabled
+                        reduceIntensity: calmerModeEnabled || reduceMotionEnabled
                     )
                 case .trends:
                     AmbientTrendsView(healthStore: healthStore)
@@ -42,6 +45,9 @@ struct AmbientHealthObjectView: View {
                         recoverySensitivity: $recoverySensitivity,
                         overallResponsiveness: $overallResponsiveness,
                         calmerModeEnabled: $calmerModeEnabled,
+                        reduceMotionEnabled: $reduceMotionEnabled,
+                        largerTextEnabled: $largerTextEnabled,
+                        higherContrastEnabled: $higherContrastEnabled,
                         resetToDefault: resetSensitivityToDefault
                     )
                 }
@@ -49,6 +55,13 @@ struct AmbientHealthObjectView: View {
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 28)
+            .modifier(AmbientLargerTextModifier(isEnabled: largerTextEnabled))
+            .contrast(higherContrastEnabled ? 1.12 : 1.0)
+            .transaction { transaction in
+                if reduceMotionEnabled {
+                    transaction.animation = nil
+                }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             AmbientBottomBar(selectedTab: $selectedTab)
@@ -107,6 +120,18 @@ struct AmbientHealthObjectView: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
             applySensitivityProfile()
+        }
+    }
+}
+
+private struct AmbientLargerTextModifier: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.dynamicTypeSize(.xLarge)
+        } else {
+            content
         }
     }
 }
