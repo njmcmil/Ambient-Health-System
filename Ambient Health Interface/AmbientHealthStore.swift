@@ -17,10 +17,10 @@ import HealthKit
 final class AmbientHealthStore: ObservableObject {
     // These defaults are tuned for my current Apple Watch SE 3-oriented signal mix; subject to change
     struct SensitivityProfile {
-        var stress: Double = 0.78
-        var movement: Double = 0.52
-        var recovery: Double = 0.72
-        var overall: Double = 0.64
+        var stress: Double = 0.74
+        var movement: Double = 0.54
+        var recovery: Double = 0.70
+        var overall: Double = 0.60
 
         static let `default` = SensitivityProfile()
     }
@@ -36,11 +36,11 @@ final class AmbientHealthStore: ObservableObject {
         var profile: SensitivityProfile {
             switch self {
             case .gentle:
-                return .init(stress: 0.58, movement: 0.42, recovery: 0.60, overall: 0.50)
+                return .init(stress: 0.42, movement: 0.34, recovery: 0.48, overall: 0.40)
             case .recommended:
                 return .default
             case .responsive:
-                return .init(stress: 0.88, movement: 0.68, recovery: 0.84, overall: 0.76)
+                return .init(stress: 0.94, movement: 0.76, recovery: 0.88, overall: 0.82)
             case .custom:
                 return .default
             }
@@ -239,6 +239,7 @@ final class AmbientHealthStore: ObservableObject {
     }
 
     @Published private(set) var currentState: ColorHealthState = .gray
+    @Published private(set) var previewState: ColorHealthState?
     @Published private(set) var history: [ColorHealthState] = []
     @Published private(set) var authorizationState: AuthorizationState
     @Published private(set) var latestSnapshot: Snapshot?
@@ -250,6 +251,10 @@ final class AmbientHealthStore: ObservableObject {
     @Published private(set) var signalEntries: [HealthSignalEntry] = []
 
     let healthStore = HKHealthStore()
+
+    var displayedState: ColorHealthState {
+        previewState ?? currentState
+    }
 
     // Keep read types centralized so authorization and refresh stay in sync.
     private let healthTypes: Set<HKObjectType> = {
@@ -405,6 +410,18 @@ final class AmbientHealthStore: ObservableObject {
         setState(classify(snapshot: latestSnapshot, baseline: baselineSummary), shouldSendToPi: true)
     }
 
+    func setPreviewState(_ state: ColorHealthState?) {
+        previewState = state
+        if let state {
+            // Preview temporarily drives the ambient object so the user can test the room/device
+            // without mutating the actual live classification.
+            PiController.shared.sendHealthState(state)
+        } else {
+            // Leaving preview restores the true live state.
+            PiController.shared.sendHealthState(currentState)
+        }
+    }
+
     private func refreshAuthorizationState() async {
         guard HKHealthStore.isHealthDataAvailable() else {
             authorizationState = .unavailable
@@ -452,7 +469,7 @@ final class AmbientHealthStore: ObservableObject {
             history.removeFirst()
         }
 
-        if shouldSendToPi {
+        if shouldSendToPi && previewState == nil {
             PiController.shared.sendHealthState(newState)
         }
     }
@@ -484,12 +501,13 @@ final class AmbientHealthStore: ObservableObject {
         let stressWeight = normalizedSensitivity(profile.stress, overall: profile.overall)
         let movementWeight = normalizedSensitivity(profile.movement, overall: profile.overall)
         let recoveryWeight = normalizedSensitivity(profile.recovery, overall: profile.overall)
+        let overallThresholdScale = interpolate(low: 1.32, high: 0.68, factor: profile.overall)
 
-        let moderateStressThreshold = interpolate(low: 1.45, high: 0.98, factor: stressWeight)
-        let strongStressThreshold = interpolate(low: 2.15, high: 1.50, factor: stressWeight)
-        let moderateRecoveryThreshold = interpolate(low: 1.45, high: 0.95, factor: recoveryWeight)
-        let strongRecoveryThreshold = interpolate(low: 2.15, high: 1.45, factor: recoveryWeight)
-        let moderateMovementThreshold = interpolate(low: 0.95, high: 0.65, factor: movementWeight)
+        let moderateStressThreshold = interpolate(low: 1.50, high: 0.88, factor: stressWeight) * overallThresholdScale
+        let strongStressThreshold = interpolate(low: 2.25, high: 1.32, factor: stressWeight) * overallThresholdScale
+        let moderateRecoveryThreshold = interpolate(low: 1.50, high: 0.90, factor: recoveryWeight) * overallThresholdScale
+        let strongRecoveryThreshold = interpolate(low: 2.20, high: 1.30, factor: recoveryWeight) * overallThresholdScale
+        let moderateMovementThreshold = interpolate(low: 1.02, high: 0.56, factor: movementWeight) * overallThresholdScale
 
         let restingStrain = positiveDeviation(current: restingHeartRate, baseline: baseline?.restingHeartRate)
         let hrvStrain = negativeDeviation(current: heartRateVariability, baseline: baseline?.heartRateVariability)
@@ -498,6 +516,7 @@ final class AmbientHealthStore: ObservableObject {
         let deepSleepDebt = negativeDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent)
         let remSleepDebt = negativeDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
         let awakeStrain = positiveDeviation(current: awakePercent, baseline: baseline?.awakePercent)
+        let sleepSurplus = positiveDeviation(current: sleepHours, baseline: baseline?.sleepHours)
         let stepDeficit = negativeDeviation(current: steps, baseline: baseline?.stepCount)
         let exerciseDeficit = negativeDeviation(current: exerciseMinutes, baseline: baseline?.exerciseMinutes)
         let stepSurplus = positiveDeviation(current: steps, baseline: baseline?.stepCount)
@@ -581,10 +600,23 @@ final class AmbientHealthStore: ObservableObject {
                || heartRateVariability < interpolate(low: 20, high: 28, factor: recoveryWeight)
                || restingHeartRate >= interpolate(low: 86, high: 78, factor: recoveryWeight))
 
+        // Long sleep is not automatically "good." If sleep runs much longer than usual while
+        // recovery markers are not especially supportive, treat that as a softer caution signal
+        // instead of rewarding it as restored.
+        let oversleepConcern = (
+            sleepHours >= 9.25
+            || (sleepHours >= 8.8 && sleepSurplus >= moderateRecoveryThreshold)
+        ) && (
+            !sleepStageStrong
+            || heartRateVariability < interpolate(low: 42, high: 36, factor: recoveryWeight)
+            || steps < interpolate(low: 3_600, high: 5_000, factor: movementWeight)
+        )
+
         let recoveryStrong = strongRecoverySignals >= 3
             && exceptionalRecoverySignals >= 1
             && sleepStageStrong
             && restingHeartRate <= 75
+            && !oversleepConcern
 
         let hourOfDay = Calendar.current.component(.hour, from: snapshot.sampledAt)
 
@@ -595,13 +627,21 @@ final class AmbientHealthStore: ObservableObject {
             && activeEnergy < interpolate(low: 190, high: 320, factor: movementWeight)
         let movementLowRelative = stepDeficit >= moderateMovementThreshold && exerciseDeficit >= moderateMovementThreshold * 0.75
         let movementLowEarlyDay = steps < 900 && exerciseMinutes < 4 && activeEnergy < 120
+        let movementVeryLow = steps < interpolate(low: 900, high: 1_800, factor: movementWeight)
+            && exerciseMinutes < interpolate(low: 4, high: 10, factor: movementWeight)
+            && activeEnergy < interpolate(low: 120, high: 220, factor: movementWeight)
         let movementLow = {
             if hourOfDay < 11 {
                 return false
             }
 
             if hourOfDay < 14 {
-                return movementLowEarlyDay || (movementLowAbsolute && movementLowRelative)
+                return movementLowEarlyDay || movementVeryLow || (movementLowAbsolute && movementLowRelative)
+            }
+
+            // When the user lowers Low Energy sensitivity, require stronger agreement before yellow shows up.
+            if movementWeight < 0.42 {
+                return movementVeryLow || (movementLowAbsolute && movementLowRelative)
             }
 
             return movementLowAbsolute || movementLowRelative
@@ -635,12 +675,16 @@ final class AmbientHealthStore: ObservableObject {
             || (recoveryWeak && stressElevated && respiratoryStrain >= strongStressThreshold)
         let stressedMoodScore = restingStrain + hrvStrain + respiratoryStrain + max(sleepDebt, awakeStrain)
         let drainedMoodScore = sleepDebt + deepSleepDebt + remSleepDebt + awakeStrain + (hrvStrain * 0.7) + (restingStrain * 0.45)
+            + (oversleepConcern ? 0.9 : 0)
+        let lowEnergyMoodScore = stepDeficit + exerciseDeficit + max(0, moderateMovementThreshold - min(stepDeficit, moderateMovementThreshold * 0.5))
         let recoveryPatternDominant = drainedMoodScore >= stressedMoodScore + 0.45
+        let drainClearlyDominant = drainedMoodScore >= lowEnergyMoodScore + 0.55
         let drainSignalCount = [sleepDebt, deepSleepDebt, remSleepDebt, awakeStrain]
             .filter { $0 >= moderateRecoveryThreshold }
             .count
         let moderateStrain = oxygenConcern
-            || (drainSignalCount >= 2 && (recoveryWeak || temperatureStrain))
+            || (drainSignalCount >= 2 && (recoveryWeak || temperatureStrain) && drainClearlyDominant)
+            || (oversleepConcern && movementLow && !stressElevated && drainClearlyDominant)
             || (strongStressSignals >= 2 && recoveryPatternDominant)
 
         // State ordering matters. Severe states now require corroboration across signals.
@@ -664,7 +708,11 @@ final class AmbientHealthStore: ObservableObject {
             return .green
         }
 
-        if movementLow && !stressElevated && !recoveryWeak {
+        let lowEnergyAllowed = movementLow
+            && !stressElevated
+            && (!recoveryWeak || !drainClearlyDominant || drainSignalCount < 2)
+
+        if lowEnergyAllowed {
             return .yellow
         }
 
@@ -1432,8 +1480,10 @@ final class AmbientHealthStore: ObservableObject {
     }
 
     private func normalizedSensitivity(_ sliderValue: Double, overall: Double) -> Double {
-        // Keep the dedicated sliders mostly independent so users can predict what each one changes.
-        min(max((sliderValue * 0.88) + (overall * 0.12), 0), 1)
+        // Make the dedicated slider itself decisive so moving it feels meaningful, especially near
+        // the low and high ends, while the overall slider is applied separately at the threshold level.
+        let clamped = min(max(sliderValue, 0), 1)
+        return pow(clamped, 0.82)
     }
 
     private func interpolate(low: Double, high: Double, factor: Double) -> Double {
