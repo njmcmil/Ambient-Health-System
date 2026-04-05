@@ -25,6 +25,7 @@ final class AmbientHealthStore: ObservableObject {
     @Published private(set) var signalEntries: [HealthSignalEntry] = []
 
     let healthStore = HKHealthStore()
+    private let bpmUnit = HKUnit.count().unitDivided(by: .minute())
     private var supplementalRefreshTask: Task<Void, Never>?
     private var refreshWatchdogTask: Task<Void, Never>?
     private var postAuthorizationRefreshTask: Task<Void, Never>?
@@ -314,5 +315,55 @@ final class AmbientHealthStore: ObservableObject {
         if shouldSendToPi && previewState == nil {
             PiController.shared.sendHealthState(newState)
         }
+    }
+
+    func preset(matching profile: SensitivityProfile) -> SensitivityPreset {
+        let presets = SensitivityPreset.allCases.filter { $0 != .custom }
+        guard let closest = presets.min(by: {
+            sensitivityDistance(profile, $0.profile) < sensitivityDistance(profile, $1.profile)
+        }) else {
+            return .custom
+        }
+
+        return sensitivityDistance(profile, closest.profile) < 0.05 ? closest : .custom
+    }
+
+    func signalEntries(for snapshot: Snapshot?) -> [HealthSignalEntry] {
+        let labels = [
+            ("Sleep", snapshot?.sleepHours != nil || snapshot?.sleepStages != nil),
+            ("Resting Heart Rate", snapshot?.restingHeartRate != nil),
+            ("HRV", snapshot?.heartRateVariability != nil),
+            ("Breathing", snapshot?.respiratoryRate != nil),
+            ("Steps", snapshot?.stepCountToday != nil),
+            ("Exercise", snapshot?.exerciseMinutesToday != nil),
+            ("Mindful Minutes", snapshot?.mindfulMinutesToday != nil)
+        ]
+
+        return labels.map { label, hasData in
+            let status: HealthSignalStatus
+            switch authorizationState {
+            case .notDetermined, .denied:
+                status = .awaitingConnection
+            case .unavailable:
+                status = .noRecentData
+            case .partial, .authorized:
+                status = hasData ? .readable : .noRecentData
+            }
+
+            return HealthSignalEntry(label: label, status: status)
+        }
+    }
+
+    nonisolated static func isNoDataError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == HKError.errorDomain
+            && nsError.code == HKError.Code.errorNoData.rawValue
+    }
+
+    private func sensitivityDistance(_ lhs: SensitivityProfile, _ rhs: SensitivityProfile) -> Double {
+        abs(lhs.stress - rhs.stress)
+            + abs(lhs.movement - rhs.movement)
+            + abs(lhs.recovery - rhs.recovery)
+            + abs(lhs.overall - rhs.overall)
     }
 }

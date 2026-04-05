@@ -7,10 +7,32 @@ import HealthKit
 /// can rely on without digging through HealthKit query code or classification logic.
 extension AmbientHealthStore {
     struct SensitivityProfile {
-        var stress: Double = 0.74
-        var movement: Double = 0.54
-        var recovery: Double = 0.70
+        var stress: Double = 0.65
+        var movement: Double = 0.55
+        var recovery: Double = 0.60
         var overall: Double = 0.60
+        
+        private func clamped(_ value: Double) -> Double {
+                min(max(value, 0.0), 1.2)
+            }
+
+        var normalizedStress: Double { clamped(stress) }
+        var normalizedMovement: Double { clamped(movement) }
+        var normalizedRecovery: Double { clamped(recovery) }
+        var normalizedOverall: Double { clamped(overall) }
+        
+        
+        var adjustedStress: Double {
+            normalizedStress * normalizedOverall
+        }
+
+        var adjustedMovement: Double {
+            normalizedMovement * normalizedOverall
+        }
+
+        var adjustedRecovery: Double {
+            normalizedRecovery * normalizedOverall
+        }
 
         static let `default` = SensitivityProfile()
     }
@@ -26,13 +48,13 @@ extension AmbientHealthStore {
         var profile: SensitivityProfile {
             switch self {
             case .gentle:
-                return .init(stress: 0.42, movement: 0.34, recovery: 0.48, overall: 0.40)
+                return .init(stress: 0.35, movement: 0.25, recovery: 0.40, overall: 0.30)
             case .recommended:
                 return .default
             case .responsive:
-                return .init(stress: 0.94, movement: 0.76, recovery: 0.88, overall: 0.82)
+                return .init(stress: 1.0, movement: 0.85, recovery: 0.95, overall: 0.90)
             case .custom:
-                return .default
+                return SensitivityProfile()
             }
         }
     }
@@ -220,6 +242,16 @@ extension AmbientHealthStore {
         let sleepStages: SleepStageBreakdown?
         let mindfulMinutesToday: Double?
         let sampledAt: Date
+        
+        var heartRateDelta: Double? {
+            guard let current = currentHeartRate,
+                  let resting = restingHeartRate else { return nil }
+            return current - resting
+        }
+        
+        var isElevatedHeartRate: Bool {
+            (heartRateDelta ?? 0) > 15
+        }
     }
 
     /// A grouped overnight session reconstructed from raw HealthKit sleep stage samples.

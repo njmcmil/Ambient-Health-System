@@ -7,91 +7,112 @@ import HealthKit
 /// what came from HealthKit versus how the app interpreted it.
 extension AmbientHealthStore {
     func loadSnapshot() async throws -> Snapshot {
-        // Keep the first refresh path intentionally light. This captures the
-        // movement/cardio signals the UI needs first, then the richer recovery
-        // context is layered in later once the app is already stable.
+        let now = Date()
+
+        // MARK: - Parallel HealthKit Queries
         async let steps = totalStepCountToday()
         async let activeEnergy = totalQuantityToday(for: .activeEnergyBurned, unit: .kilocalorie())
         async let exerciseMinutes = totalQuantityToday(for: .appleExerciseTime, unit: .minute())
-        async let recentWorkout = recentWorkoutContext()
         async let walkingRunningDistance = totalQuantityToday(for: .distanceWalkingRunning, unit: .meterUnit(with: .kilo))
         async let flightsClimbed = totalQuantityToday(for: .flightsClimbed, unit: .count())
-        let currentHeartRate = try await latestQuantityValue(
+
+        async let recentWorkout = recentWorkoutContext()
+
+        // parallelized
+        async let currentHeartRate = latestQuantityValue(
             for: .heartRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
             maxAgeHours: 6
         )
-        let restingHeartRate = try await latestQuantityValue(
+
+        async let restingHeartRate = latestQuantityValue(
             for: .restingHeartRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
             maxAgeHours: 36
         )
-        let heartRateVariability = try await latestQuantityValue(
+
+        async let heartRateVariability = latestQuantityValue(
             for: .heartRateVariabilitySDNN,
             unit: HKUnit.secondUnit(with: .milli),
             maxAgeHours: 36
         )
-        let mindfulMinutes = try await categoryDurationToday(for: .mindfulSession)
 
+        async let mindfulMinutes = categoryDurationToday(for: .mindfulSession)
+
+        // MARK: - Await Results (only once per value)
         let loadedRecentWorkout = try await recentWorkout
 
         return Snapshot(
             recentWorkoutMinutes: loadedRecentWorkout?.durationMinutes,
             minutesSinceRecentWorkout: loadedRecentWorkout?.minutesSinceEnd,
+
             stepCountToday: try await steps,
             activeEnergyToday: try await activeEnergy,
             exerciseMinutesToday: try await exerciseMinutes,
             walkingRunningDistanceToday: try await walkingRunningDistance,
             flightsClimbedToday: try await flightsClimbed,
-            currentHeartRate: currentHeartRate,
-            restingHeartRate: restingHeartRate,
-            heartRateVariability: heartRateVariability,
+
+            currentHeartRate: try await currentHeartRate,
+            restingHeartRate: try await restingHeartRate,
+            heartRateVariability: try await heartRateVariability,
+
             respiratoryRate: nil,
             oxygenSaturationPercent: nil,
             wristTemperatureCelsius: nil,
+
             sleepHours: nil,
             sleepStages: nil,
-            mindfulMinutesToday: mindfulMinutes,
-            sampledAt: Date()
+
+            mindfulMinutesToday: try await mindfulMinutes,
+            sampledAt: now
         )
     }
-
     func enrichSnapshot(_ snapshot: Snapshot) async throws -> Snapshot {
-        let respiratoryRate = try await latestQuantityValue(
+        // MARK: - Parallel HealthKit Queries
+        async let respiratoryRate = latestQuantityValue(
             for: .respiratoryRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
             maxAgeHours: 36
         )
-        let oxygenSaturation = try await latestQuantityValue(
+
+        async let oxygenSaturation = latestQuantityValue(
             for: .oxygenSaturation,
             unit: .percent(),
             maxAgeHours: 36
         )
-        let wristTemperature = try await latestQuantityValue(
+
+        async let wristTemperature = latestQuantityValue(
             for: .appleSleepingWristTemperature,
             unit: .degreeCelsius(),
             maxAgeHours: 48,
             treatZeroAsNil: false
         )
-        let sleepHours = try await sleepHoursSinceYesterdayEvening()
-        let sleepStages = try await sleepStageBreakdownSinceYesterdayEvening()
 
+        async let sleepHours = sleepHoursSinceYesterdayEvening()
+        async let sleepStages = sleepStageBreakdownSinceYesterdayEvening()
+
+        // MARK: - Build Snapshot (await once per value)
         return Snapshot(
             recentWorkoutMinutes: snapshot.recentWorkoutMinutes,
             minutesSinceRecentWorkout: snapshot.minutesSinceRecentWorkout,
+
             stepCountToday: snapshot.stepCountToday,
             activeEnergyToday: snapshot.activeEnergyToday,
             exerciseMinutesToday: snapshot.exerciseMinutesToday,
             walkingRunningDistanceToday: snapshot.walkingRunningDistanceToday,
             flightsClimbedToday: snapshot.flightsClimbedToday,
+
             currentHeartRate: snapshot.currentHeartRate,
             restingHeartRate: snapshot.restingHeartRate,
             heartRateVariability: snapshot.heartRateVariability,
-            respiratoryRate: respiratoryRate,
-            oxygenSaturationPercent: oxygenSaturation.map { $0 * 100 },
-            wristTemperatureCelsius: wristTemperature,
-            sleepHours: sleepHours,
-            sleepStages: sleepStages,
+
+            respiratoryRate: try await respiratoryRate,
+            oxygenSaturationPercent: try await oxygenSaturation.map { $0 * 100 },
+            wristTemperatureCelsius: try await wristTemperature,
+
+            sleepHours: try await sleepHours,
+            sleepStages: try await sleepStages,
+
             mindfulMinutesToday: snapshot.mindfulMinutesToday,
             sampledAt: snapshot.sampledAt
         )
@@ -267,7 +288,7 @@ extension AmbientHealthStore {
         let predicate = HKQuery.predicateForSamples(
             withStart: Calendar.current.startOfDay(for: Date()),
             end: Date(),
-            options: .strictStartDate
+            options: []
         )
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -307,11 +328,15 @@ extension AmbientHealthStore {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
 
         return try await withCheckedThrowingContinuation { continuation in
+            var components = calendar.dateComponents([.year, .month, .day], from: Date())
+            components.hour = 12
+            let anchorDate = calendar.date(from: components)!
+
             let query = HKStatisticsCollectionQuery(
                 quantityType: quantityType,
                 quantitySamplePredicate: predicate,
                 options: .cumulativeSum,
-                anchorDate: calendar.startOfDay(for: Date()),
+                anchorDate: anchorDate,
                 intervalComponents: DateComponents(day: 1)
             )
 
@@ -352,12 +377,17 @@ extension AmbientHealthStore {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
 
         return try await withCheckedThrowingContinuation { continuation in
+            var components = calendar.dateComponents([.year, .month, .day], from: Date())
+            components.hour = 12
+            let anchorDate = calendar.date(from: components)!
+            
             let query = HKStatisticsCollectionQuery(
                 quantityType: quantityType,
                 quantitySamplePredicate: predicate,
                 options: .discreteAverage,
-                anchorDate: calendar.startOfDay(for: Date()),
+                anchorDate: anchorDate,
                 intervalComponents: DateComponents(day: 1)
+                
             )
 
             query.initialResultsHandler = { _, results, error in
@@ -543,7 +573,7 @@ extension AmbientHealthStore {
         guard let session = try await latestCompletedSleepSession() else { return nil }
         let breakdown = session.breakdown
         return SleepStageTrendPoint(
-            date: session.startDate,
+            date: Calendar.current.startOfDay(for: session.endDate),
             totalSleepHours: breakdown.totalSleepHours,
             deepPercent: breakdown.deepPercent,
             remPercent: breakdown.remPercent,
@@ -738,8 +768,7 @@ extension AmbientHealthStore {
 
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
-        let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
-        let queryStart = calendar.date(byAdding: .hour, value: -18, to: startDate) ?? startDate
+        let queryStart = calendar.date(byAdding: .day, value: -(days + 1), to: todayStart)!
         let queryEnd = Date()
         let predicate = HKQuery.predicateForSamples(withStart: queryStart, end: queryEnd, options: .strictStartDate)
         let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
@@ -768,7 +797,7 @@ extension AmbientHealthStore {
         }
 
         let sessionsByDay = Dictionary(grouping: sessions) { session in
-            calendar.startOfDay(for: session.startDate)
+            calendar.startOfDay(for: session.endDate)
         }
 
         var points: [SleepStageTrendPoint] = []
