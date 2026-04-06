@@ -91,6 +91,8 @@ struct AmbientSectionHeader: View {
     let title: String
     let symbol: String
     let tint: Color
+    var animateSymbol: Bool = false
+    @State private var symbolPulse = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -107,10 +109,26 @@ struct AmbientSectionHeader: View {
                 Image(systemName: symbol)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tint.opacity(0.92))
+                    .scaleEffect(animateSymbol && symbolPulse ? 1.06 : 1.0)
+                    .opacity(animateSymbol && symbolPulse ? 0.90 : 1.0)
             }
+            .onAppear { updatePulseAnimation() }
+            .onChange(of: animateSymbol) { _, _ in updatePulseAnimation() }
 
             Text(title)
                 .font(.headline)
+        }
+    }
+
+    private func updatePulseAnimation() {
+        guard animateSymbol else {
+            symbolPulse = false
+            return
+        }
+
+        symbolPulse = false
+        withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+            symbolPulse = true
         }
     }
 }
@@ -198,13 +216,20 @@ struct AmbientInsightHistoryTrail: View {
 struct AmbientAccessibilityToggleCard: View {
     let title: String
     let subtitle: String
+    let symbol: String? = nil
     @Binding var isOn: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Image(systemName: symbol ?? iconForTitle(title))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(title)
+                        .font(.headline)
+                }
 
                 Text(subtitle)
                     .font(.footnote)
@@ -219,6 +244,21 @@ struct AmbientAccessibilityToggleCard: View {
         }
         .padding(16)
         .ambientSubpanel(tint: Color(red: 0.49, green: 0.72, blue: 0.96))
+    }
+
+    private func iconForTitle(_ title: String) -> String {
+        switch title {
+        case "Calmer Mode":
+            return "water.waves"
+        case "Reduce Motion":
+            return "figure.walk.motion"
+        case "Larger Text":
+            return "textformat.size"
+        case "Higher Contrast":
+            return "circle.lefthalf.filled"
+        default:
+            return "accessibility"
+        }
     }
 }
 
@@ -432,7 +472,7 @@ func symbolForState(_ state: ColorHealthState) -> String {
     case .purple:
         return "bolt.fill"
     case .gray:
-        return "circle.fill"
+        return "circle.hexagongrid.fill"
     case .red:
         return "flame.fill"
     case .orange:
@@ -453,14 +493,21 @@ func weeklyTrendSummary(
     }
 
     let delta = latest - average
+    let averageText = "\(formatter(average)) \(unit)"
     let latestText = "\(formatter(latest)) \(unit)"
 
     if abs(delta) < max(average * 0.08, unit == "h" ? 0.35 : 2) {
-        return includeLatest ? "This week looks fairly steady. Latest: \(latestText)." : "This week looks fairly steady."
+        return includeLatest
+            ? "Weekly average is \(averageText). Current is \(latestText), so this week looks fairly steady."
+            : "Weekly average is \(averageText), and the week looks fairly steady."
     } else if delta > 0 {
-        return includeLatest ? "Lately \(highMeaning). Latest: \(latestText)." : "Lately \(highMeaning)."
+        return includeLatest
+            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(highMeaning)."
+            : "Weekly average is \(averageText), and lately \(highMeaning)."
     } else {
-        return includeLatest ? "Lately \(lowMeaning). Latest: \(latestText)." : "Lately \(lowMeaning)."
+        return includeLatest
+            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(lowMeaning)."
+            : "Weekly average is \(averageText), and lately \(lowMeaning)."
     }
 }
 
@@ -499,14 +546,21 @@ func inverseWeeklyTrendSummary(
     }
 
     let delta = latest - average
+    let averageText = "\(formatter(average)) \(unit)"
     let latestText = "\(formatter(latest)) \(unit)"
 
     if abs(delta) < max(average * 0.06, 2) {
-        return includeLatest ? "This week looks fairly steady. Latest: \(latestText)." : "This week looks fairly steady."
+        return includeLatest
+            ? "Weekly average is \(averageText). Current is \(latestText), so this week looks fairly steady."
+            : "Weekly average is \(averageText), and the week looks fairly steady."
     } else if delta > 0 {
-        return includeLatest ? "Lately \(highMeaning). Latest: \(latestText)." : "Lately \(highMeaning)."
+        return includeLatest
+            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(highMeaning)."
+            : "Weekly average is \(averageText), and lately \(highMeaning)."
     } else {
-        return includeLatest ? "Lately \(lowMeaning). Latest: \(latestText)." : "Lately \(lowMeaning)."
+        return includeLatest
+            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(lowMeaning)."
+            : "Weekly average is \(averageText), and lately \(lowMeaning)."
     }
 }
 

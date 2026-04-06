@@ -2,33 +2,39 @@
 
 ## Overview
 
-Ambient Health System is a SwiftUI iPhone app that turns Apple Health patterns into mood-like ambient states and sends those states to a smart light through a Raspberry Pi backend.
+Ambient Health System is a SwiftUI iPhone prototype that interprets Apple Health patterns into ambient mood-like states and maps those states to:
 
-The app is designed to feel calm and glanceable rather than dashboard-heavy. Instead of pushing raw metrics to the foreground, it:
+* an on-screen animated ambient entity
+* a connected ambient light via Raspberry Pi bridge
 
-* builds a personal multi-week baseline from Apple Health
-* compares the current day to that baseline
-* classifies the result into ambient states such as `Restored`, `Grounded`, `Neutral`, `Low Energy`, `Stressed`, `Drained`, and `Overloaded`
-* visualizes the state through an animated reference object and a connected light
+The project is intentionally designed as a calm, glanceable experience (not a clinical dashboard).  
+It combines baseline-relative analysis, explainable interpretation surfaces, and ambient visual output.
 
-The current system includes:
+## End-of-Semester Prototype Readiness
 
-* iOS frontend in SwiftUI
-* Apple Health / HealthKit integration
-* baseline-relative mood-state classification
-* a Raspberry Pi FastAPI bridge for ambient light output
-* TP-Link smart bulb control through the Pi backend
+As implemented now, this is a strong end-of-semester prototype because it has:
 
-## Current Features
+* a clear core interaction loop (`Health data -> inferred state -> visual/physical ambient feedback`)
+* a complete multi-screen product flow (`Now`, `Explanation`, `Trends`, `Settings`)
+* non-trivial technical depth (HealthKit queries, baseline modeling, state classifier, hardware bridge)
+* user-facing accessibility controls and preview/testing tooling
 
-### Health state engine
+It is still a prototype (not production health software), but it is robust enough for a final academic demo.
 
-The app no longer uses only simple fixed thresholds. It now:
+## Current Implementation
 
-* builds a personal baseline over recent weeks
-* interprets the current day relative to that baseline
-* uses workout-aware stress suppression so exercise is less likely to be mistaken for emotional stress
-* treats preview mode separately from live state classification
+### Health-state engine
+
+The app uses Apple Health data and computes state from personal context, not raw one-off thresholds.
+
+Current behavior includes:
+
+* personal baseline modeling over recent weeks
+* live snapshot + trend report interpretation
+* workout-aware suppression to avoid false stress reads during/after exercise
+* sensitivity tuning (`Gentle`, `Recommended`, `Responsive`, `Custom`)
+* preview mode isolated from live classification
+* developer-only demo datasets for deterministic presentation testing
 
 ### Ambient states
 
@@ -44,90 +50,110 @@ The current state set is:
 
 Each state has:
 
-* its own color
-* its own reference-object motion and shape language
-* its own ambient bulb brightness target
+* unique color mapping
+* distinct motion/character mapping in the reference entity
+* target brightness for Pi light output
+
+### Reference entity design
+
+The reference object is currently implemented as a living entity form (not a chart or static icon), with:
+
+* layered organic lobes
+* dynamic core behavior
+* subtle state-specific character differences
+* reduced-intensity behavior when accessibility reduction is enabled
 
 ### UI surfaces
 
-The app currently includes:
-
 * `Now`
-  * animated ambient reference object
-  * weekly calendar / state memory
-  * live connection indicator for the ambient object
+  * live state title + short interpretation line
+  * ambient entity
+  * state-aware calendar memory
+  * Pi connection indicator
 * `Explanation`
-  * state explanation
-  * pattern insight
-  * preview-aware interpretation
+  * `What This May Mean` (plain-language interpretation)
+  * `Pattern Insight` (non-duplicate pattern-level interpretation)
+  * preview-aware explanation behavior
 * `Trends`
-  * weekly summaries
-  * calmer-mode text-only trend presentation
-  * preview-aware trend interpretation
+  * weekly trend cards for recovery, resting rhythm, movement, sleep duration, and sleep quality
+  * calmer-mode simplified trend presentation
 * `Settings`
   * sensitivity controls
-  * calmer mode / accessibility option
-  * state preview mode
-  * HealthKit status
+  * state preview controls
+  * HealthKit status breakdown
+  * `Last refresh` + `Last successful Health read` timestamps
+  * ambient object send log (status + latency)
+  * per-state ambient brightness overrides for Pi output
+  * accessibility controls
+  * dev-only classifier debug snapshot + confidence readout
+
+### Accessibility features
+
+Current accessibility options include:
+
+* `Calmer Mode`
+* `Reduce Motion`
+* `Larger Text`
+* `Higher Contrast`
+
+These options are presentation-layer adjustments only and do not alter classification logic.
 
 ### Preview mode
 
-State preview mode can:
+State preview currently supports:
 
-* preview a chosen health state in the app UI
-* temporarily send that preview state to the ambient object
-* restore the real live state after returning to live mode
+* previewing any state in UI
+* temporary Pi send for previewed state
+* returning to live state routing after preview ends
 
-### Calmer mode
+### Developer testing surfaces
 
-Calmer mode is an accessibility-oriented presentation mode for anxious users. It:
+Debug builds include:
 
-* softens motion and glow
-* disables press interaction on the reference object
-* reduces visual intensity in the UI
-* changes explanation / trends wording to be less clinical and less intense
-
-It does not change the underlying health-state logic.
+* `Debug Snapshot (Dev Only)` with a detailed classifier reasoning report
+* one-line classifier confidence summary for faster diagnosis
+* `Demo Mode (Dev Only)` with selectable deterministic datasets for each health state
 
 ## Repository Structure
 
+### iOS app
+
 * `Ambient Health Interface/`
-  SwiftUI iOS application source
+  * `App/`
+  * `Controllers/`
+  * `DetailViews/`
+  * `HealthStore/`
+  * `Models/`
+  * `NowUI/`
+  * `Reference/`
+  * `Support/`
+
+### Xcode project
 
 * `Ambient Health Interface.xcodeproj/`
-  Xcode project
 
-* `Ambient-Health-PI/`
-  Raspberry Pi FastAPI backend used to drive the smart bulb
+### Pi backend
 
-## Frontend Setup
+* `Ambient-Health-PI/` (FastAPI bridge for smart-bulb control)
+
+## iOS Setup
 
 1. Open [Ambient Health Interface.xcodeproj](/Users/nathanmcmillan/Desktop/XCodeFiles/Ambient%20Health%20Interface/Ambient%20Health%20Interface.xcodeproj) in Xcode.
 2. Run on a physical iPhone for real HealthKit behavior.
-3. Grant Apple Health permissions when prompted.
-4. Make sure the phone can reach the Pi over the same local network.
+3. Grant Health permissions when prompted.
+4. Ensure the iPhone can reach the Pi bridge URL on the same network.
 
-## Backend Setup
+## Pi Backend Setup
 
-From the project root:
+From project root:
 
 ```bash
 cd Ambient-Health-PI
-```
-
-Install dependencies:
-
-```bash
 make install
-```
-
-Create the environment file:
-
-```bash
 cp .env.example .env
 ```
 
-Fill in the required values in `.env`:
+Set required values in `.env`:
 
 ```env
 USERNAME=your_email
@@ -135,47 +161,32 @@ PASSWORD=your_password
 BULB_IP=your_bulb_ip
 ```
 
-Run the backend:
+Run:
 
 ```bash
 make run
 ```
 
-The server runs on:
+Default server:
 
 ```text
 http://0.0.0.0:8000
 ```
 
-The iOS app sends HTTP POST requests to this backend, which then updates the smart bulb.
+Set iOS bridge URL with environment `PI_BASE_URL` if needed.
 
-## Usage
+## Usage Flow
 
-1. Start the Pi backend.
-2. Launch the iPhone app.
-3. Let the app read current Apple Health data.
-4. The app classifies the current state and sends the matching ambient state to the Pi.
-5. Use `State Preview` in Settings if you want to test how a given state looks in both the UI and the ambient object.
+1. Start Pi backend.
+2. Launch iPhone app.
+3. Connect Health and refresh.
+4. App computes live state from current signals + baseline context.
+5. App updates on-screen ambient entity and sends mapped state/brightness to Pi bridge.
+6. Use `State Preview` in Settings to test state-specific behavior.
 
-## Notes
+## Notes and Limitations
 
-* This system is now driven by live Apple Health data rather than only simulated states.
-* The app uses HealthKit data such as sleep, HRV, resting heart rate, respiratory rate, movement, exercise, and mindfulness when available.
-* The Pi connection indicator in the `Now` screen reflects the real request status from the app's last send attempt.
-* Devices still need to be on a reachable local network for live ambient light control.
-* `.env` is not included for security.
-
-## Limitations
-
-* Single ambient light path today
-* Current bulb flow still depends on a separate smart-bulb setup outside the app
-* Mood inference is wellness-oriented, not clinical or diagnostic
-* Real-world behavior still depends on Apple Health signal availability and quality
-
-## Future Work
-
-* better hardware onboarding / provisioning
-* richer ambient-object hardware output beyond a single bulb
-* broader smart-light support
-* better persistence / diagnostics for the Pi bridge
-* more explainable but still calm state interpretation
+* Wellness-oriented interpretation only (not diagnostic or medical advice).
+* Signal quality depends on Apple Health data availability and recency.
+* Smart bulb still requires its own network onboarding outside the app.
+* Current hardware path is single-bridge / single-light oriented.

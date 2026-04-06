@@ -4,6 +4,7 @@ import SwiftUI
 struct AmbientExplanationView: View {
     @ObservedObject var healthStore: AmbientHealthStore
     @AppStorage("anxietyCalmerMode") private var calmerModeEnabled = false
+    @AppStorage("accessibilityReduceMotion") private var reduceMotionEnabled = false
 
     var body: some View {
         ScrollView {
@@ -15,7 +16,8 @@ struct AmbientExplanationView: View {
                     AmbientSectionHeader(
                         title: healthStore.displayedState.title,
                         symbol: symbolForState(healthStore.displayedState),
-                        tint: healthStore.displayedState.color
+                        tint: healthStore.displayedState.color,
+                        animateSymbol: !reduceMotionEnabled
                     )
 
                     let chips = healthStore.previewState.map(previewSignalChips(for:)) ?? explanationSignalChips(snapshot: healthStore.latestSnapshot)
@@ -38,9 +40,13 @@ struct AmbientExplanationView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     AmbientSectionHeader(
                         title: "What This May Mean",
-                        symbol: "sparkles",
+                        symbol: "text.bubble.fill",
                         tint: Color(red: 0.49, green: 0.72, blue: 0.96)
                     )
+
+                    Text("Based on your current read.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     let bullets = explanationBulletContent
 
@@ -65,7 +71,7 @@ struct AmbientExplanationView: View {
                         HStack(alignment: .center) {
                             AmbientSectionHeader(
                                 title: "Pattern Insight",
-                                symbol: "text.magnifyingglass",
+                                symbol: "brain.head.profile",
                                 tint: Color(red: 0.49, green: 0.72, blue: 0.96)
                             )
 
@@ -78,9 +84,10 @@ struct AmbientExplanationView: View {
                             .font(.body.weight(.medium))
                             .foregroundStyle(.primary)
 
-                        Text(patternInsightCaption)
-                            .font(.footnote)
+                        Text("Based on your recent pattern (weekly context).")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+
                     }
                 }
                 .padding(18)
@@ -121,15 +128,4 @@ struct AmbientExplanationView: View {
             : patternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
     }
 
-    private var patternInsightCaption: String {
-        if healthStore.previewState != nil {
-            return calmerModeEnabled
-                ? "A gentler example of how this state can show up."
-                : "A plain-language read on how this state usually feels in the app."
-        }
-
-        return calmerModeEnabled
-            ? "A softer explanation based on your recent pattern and your usual rhythm."
-            : "Based on recent health patterns and how they compare to your usual rhythm."
-    }
 }

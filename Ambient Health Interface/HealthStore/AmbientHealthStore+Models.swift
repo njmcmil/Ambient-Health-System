@@ -59,6 +59,19 @@ extension AmbientHealthStore {
         }
     }
 
+    /// Developer-only demo data scenarios used by Demo Mode.
+    enum DemoDataset: String, CaseIterable, Identifiable {
+        case restored = "Restored"
+        case grounded = "Grounded"
+        case neutral = "Neutral"
+        case lowEnergy = "Low Energy"
+        case stressed = "Stressed"
+        case drained = "Drained"
+        case overloaded = "Overloaded"
+
+        var id: String { rawValue }
+    }
+
     struct TrendPoint: Identifiable {
         let date: Date
         let value: Double
@@ -191,7 +204,7 @@ extension AmbientHealthStore {
             case .partial:
                 return "HealthKit is reachable, but some of the ambient signals do not have recent readable samples yet."
             case .authorized:
-                return "The ambient state now reflects recent Apple Health patterns."
+                return "Apple Health is connected and ready for refresh."
             }
         }
     }
@@ -267,5 +280,20 @@ extension AmbientHealthStore {
     struct RecentWorkoutContext {
         let durationMinutes: Double
         let minutesSinceEnd: Double
+    }
+
+    /// Developer-facing classifier introspection payload.
+    /// Used by the debug panel in Settings to explain exactly why the state was chosen.
+    struct ClassificationDebugReport {
+        struct Section: Identifiable {
+            let id = UUID()
+            let title: String
+            let lines: [String]
+        }
+
+        let selectedState: ColorHealthState
+        let generatedAt: Date
+        let confidenceSummary: String
+        let sections: [Section]
     }
 }

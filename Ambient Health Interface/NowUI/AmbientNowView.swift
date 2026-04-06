@@ -108,7 +108,7 @@ private struct AmbientActionButtons: View {
                 Button {
                     Task { await healthStore.requestAuthorization() }
                 } label: {
-                    Label("Connect Health", systemImage: "heart.text.square.fill")
+                    Label("Connect Health", systemImage: "heart.text.square")
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 16)
                         .frame(height: 42)
@@ -128,7 +128,7 @@ private struct AmbientActionButtons: View {
                 Button {
                     healthStore.setPreviewState(nil)
                 } label: {
-                    Label("Live State", systemImage: "dot.radiowaves.left.and.right")
+                    Label("Live State", systemImage: "wave.3.right.circle")
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 16)
                         .frame(height: 42)

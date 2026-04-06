@@ -15,13 +15,13 @@ enum AmbientTab: String, CaseIterable, Identifiable {
 func tabSymbolName(for tab: AmbientTab) -> String {
     switch tab {
     case .now:
-        return "circle.hexagongrid.fill"
+        return "circle.grid.3x3.circle.fill"
     case .trends:
-        return "waveform.path.ecg"
+        return "chart.line.uptrend.xyaxis"
     case .explanation:
-        return "sparkles.rectangle.stack"
+        return "text.magnifyingglass"
     case .settings:
-        return "slider.horizontal.3"
+        return "slider.horizontal.2.square"
     }
 }
 

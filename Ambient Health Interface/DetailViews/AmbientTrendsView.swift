@@ -137,9 +137,9 @@ private struct AmbientWeeklySummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: "This Week", symbol: "sparkles", tint: currentState.color)
+            AmbientCardHeader(title: "This Week", symbol: "calendar.day.timeline.leading", tint: currentState.color)
 
-            Text("The mood read is currently \(currentState.title.lowercased()). These are the strongest weekly themes behind it.")
+            Text("The mood read for this week is \(currentState.title.lowercased()). These are the strongest weekly themes behind it.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -151,7 +151,8 @@ private struct AmbientWeeklySummaryCard: View {
                         lowMeaning: "lighter sleep than your recent norm",
                         highMeaning: "more sleep than your recent norm",
                         unit: "h",
-                        formatter: { String(format: "%.1f", $0) }
+                        formatter: { String(format: "%.1f", $0) },
+                        includeLatest: false
                     )
                 )
                 AmbientSummaryRow(
@@ -161,7 +162,8 @@ private struct AmbientWeeklySummaryCard: View {
                         lowMeaning: "recovery looked softer",
                         highMeaning: "recovery looked stronger",
                         unit: "ms",
-                        formatter: { Int($0).formatted() }
+                        formatter: { Int($0).formatted() },
+                        includeLatest: false
                     )
                 )
                 AmbientSummaryRow(
@@ -171,7 +173,8 @@ private struct AmbientWeeklySummaryCard: View {
                         lowMeaning: "your system looked calmer",
                         highMeaning: "your system looked more activated",
                         unit: "bpm",
-                        formatter: { Int($0).formatted() }
+                        formatter: { Int($0).formatted() },
+                        includeLatest: false
                     )
                 )
                 AmbientSummaryRow(
@@ -222,7 +225,7 @@ private struct AmbientEnergyRhythmCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: "Energy Rhythm", symbol: "figure.walk.motion", tint: .green)
+            AmbientCardHeader(title: "Energy Rhythm", symbol: "figure.walk.arrival", tint: .green)
 
             Text("A quick read on weekly movement and momentum.")
                 .font(.footnote)
@@ -230,8 +233,8 @@ private struct AmbientEnergyRhythmCard: View {
 
             if let avgSteps = weeklyAverage(for: steps), let avgExercise = weeklyAverage(for: exerciseMinutes) {
                 HStack(spacing: 12) {
-                    AmbientMiniMetric(title: "Avg Steps", value: Int(avgSteps).formatted())
-                    AmbientMiniMetric(title: "Avg Exercise", value: "\(Int(avgExercise)) min")
+                    AmbientMiniMetric(title: "Weekly Avg Steps", value: Int(avgSteps).formatted())
+                    AmbientMiniMetric(title: "Weekly Avg Exercise", value: "\(Int(avgExercise)) min")
                 }
             }
 
@@ -313,7 +316,7 @@ private struct AmbientEnergyRhythmCard: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.primary)
 
-                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -390,7 +393,7 @@ private struct AmbientHRVTrendCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: "Heart Rate Variability", symbol: "waveform.path.ecg", tint: .teal)
+            AmbientCardHeader(title: "Heart Rate Variability", symbol: "waveform.path", tint: .teal)
 
             Text("A softer read on recovery and tension through the week.")
                 .font(.footnote)
@@ -446,7 +449,7 @@ private struct AmbientHRVTrendCard: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.primary)
 
-                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -513,7 +516,7 @@ private struct AmbientSleepDurationCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: "Sleep Duration", symbol: "bed.double.fill", tint: tint)
+            AmbientCardHeader(title: "Sleep Duration", symbol: "moon.zzz.fill", tint: tint)
 
             Text("A quiet weekly picture of how much sleep has landed each night.")
                 .font(.footnote)
@@ -567,7 +570,7 @@ private struct AmbientSleepDurationCard: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.primary)
 
-                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -640,7 +643,7 @@ private struct AmbientHeartTrendCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: "Resting Heart Rate", symbol: "heart.fill", tint: Color(red: 1.0, green: 0.20, blue: 0.22))
+            AmbientCardHeader(title: "Resting Heart Rate", symbol: "heart.circle.fill", tint: Color(red: 1.0, green: 0.20, blue: 0.22))
 
             Text("A softer view of whether your system has looked calmer or more activated.")
                 .font(.footnote)
@@ -692,7 +695,7 @@ private struct AmbientHeartTrendCard: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.primary)
 
-                            Text(isLatest ? "Latest" : shortDayLabel(for: point.date))
+                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -776,7 +779,7 @@ private struct AmbientSleepQualitySummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AmbientCardHeader(title: "Sleep Quality", symbol: "moon.stars.fill", tint: .blue)
+            AmbientCardHeader(title: "Sleep Quality", symbol: "bed.double.circle.fill", tint: .blue)
 
             Text("A weekly read on how restorative your sleep looked, compared with the latest night.")
                 .font(.footnote)

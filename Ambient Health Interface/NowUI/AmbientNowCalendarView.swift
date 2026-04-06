@@ -180,11 +180,11 @@ private struct AmbientConnectionIndicator: View {
     private var symbolName: String {
         switch status {
         case .idle:
-            return "circle.dotted"
+            return "circle.dashed"
         case .checking:
-            return "dot.radiowaves.left.and.right"
+            return "wifi"
         case .online:
-            return "dot.radiowaves.left.and.right"
+            return "wifi"
         case .offline:
             return "wifi.slash"
         }

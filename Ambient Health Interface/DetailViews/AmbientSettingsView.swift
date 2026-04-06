@@ -5,6 +5,11 @@ import SwiftUI
 /// accessibility, sensitivity, and HealthKit status.
 struct AmbientSettingsView: View {
     @ObservedObject var healthStore: AmbientHealthStore
+    @ObservedObject private var piController = PiController.shared
+#if DEBUG
+    @AppStorage("ambientDemoModeEnabled") private var demoModeEnabled = false
+    @AppStorage("ambientDemoDatasetRaw") private var demoDatasetRaw = AmbientHealthStore.DemoDataset.grounded.rawValue
+#endif
     @Binding var stressSensitivity: Double
     @Binding var movementSensitivity: Double
     @Binding var recoverySensitivity: Double
@@ -17,6 +22,11 @@ struct AmbientSettingsView: View {
     @State private var showsAccessibilitySection = false
     @State private var showsHealthKitSection = false
     @State private var showsStatePreviewSection = false
+    @State private var showsPiLogSection = false
+    @State private var showsBrightnessSection = false
+#if DEBUG
+    @State private var showsDebugSnapshotSection = false
+#endif
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -177,6 +187,15 @@ struct AmbientSettingsView: View {
                         Text(healthStore.authorizationState.title)
                             .font(.subheadline.weight(.semibold))
 
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Last refresh: \(formattedTimestamp(healthStore.lastRefreshAttemptAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Last successful Health read: \(formattedTimestamp(healthStore.lastSuccessfulHealthReadAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Text(healthStore.authorizationSummaryLine)
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(.secondary)
@@ -200,6 +219,16 @@ struct AmbientSettingsView: View {
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                            }
+
+                            if healthStore.latestSnapshot?.wristTemperatureCelsius == nil {
+                                Text("Wrist temperature may show as no recent data during the day and often appears after sleep sessions.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else if let wristTemp = healthStore.latestSnapshot?.wristTemperatureCelsius {
+                                Text("Latest wrist temperature: \(String(format: "%.2f", wristTemp))°C")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
                             }
                         }
 
@@ -228,11 +257,229 @@ struct AmbientSettingsView: View {
                 }
                 .padding(18)
                 .ambientPanel(tint: Color.white)
+
+                DisclosureGroup(isExpanded: $showsPiLogSection) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Recent ambient object sends, including status and latency.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        if piController.sendLogs.isEmpty {
+                            Text("No sends yet this session.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(piController.sendLogs.reversed()) { log in
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Circle()
+                                            .fill(log.state.color.opacity(0.9))
+                                            .frame(width: 8, height: 8)
+                                            .padding(.top, 5)
+
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("\(log.state.title) • \(log.brightness)%")
+                                                .font(.caption.weight(.semibold))
+
+                                            Text("Status: \(log.statusCode.map(String.init) ?? "No HTTP")  •  Latency: \(log.latencyMs.map { "\($0)ms" } ?? "n/a")")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+
+                                            Text("\(timeOnly(log.timestamp)) • \(log.message)")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(10)
+                                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Ambient Object Send Log")
+                            .font(.headline)
+
+                        Text("Expand to verify state, brightness, status, and latency for recent sends.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(18)
+                .ambientPanel(tint: Color(red: 0.49, green: 0.72, blue: 0.96))
+
+                DisclosureGroup(isExpanded: $showsBrightnessSection) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Adjust brightness sent to the ambient object for each health state color.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        ForEach(ColorHealthState.allCases) { state in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(state.color)
+                                            .frame(width: 8, height: 8)
+                                        Text(state.title)
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    Spacer()
+                                    Text("\(piController.brightnessForState(state))%")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Slider(
+                                    value: brightnessBinding(for: state),
+                                    in: 0...100,
+                                    step: 1
+                                )
+                                .tint(state.color)
+                            }
+                            .padding(10)
+                            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+
+                        HStack {
+                            Spacer()
+                            Button("Reset to Defaults") {
+                                piController.resetBrightnessOverrides()
+                                let visibleState = healthStore.displayedState
+                                let defaultBrightness = piController.brightnessForState(visibleState)
+                                piController.sendHealthStateDebounced(
+                                    visibleState,
+                                    brightness: defaultBrightness,
+                                    delayMs: 200
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Ambient Brightness")
+                            .font(.headline)
+
+                        Text("Per-state brightness for Pi sends.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(18)
+                .ambientPanel(tint: Color.white)
+
+#if DEBUG
+                DisclosureGroup(isExpanded: $showsDebugSnapshotSection) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Developer-only snapshot details for explaining why the current state was chosen.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Text("State under analysis: \(healthStore.currentState.title)")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        if let report = healthStore.latestClassificationDebug {
+                            Text("Generated: \(timeOnly(report.generatedAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(report.confidenceSummary)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary.opacity(0.88))
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(report.sections) { section in
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(section.title)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary)
+
+                                        ForEach(Array(section.lines.enumerated()), id: \.offset) { entry in
+                                            HStack(alignment: .top, spacing: 8) {
+                                                Circle()
+                                                    .fill(Color.white.opacity(0.55))
+                                                    .frame(width: 5, height: 5)
+                                                    .padding(.top, 6)
+                                                Text(entry.element)
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        } else {
+                            Text("No classifier debug report yet. Refresh Health to generate one.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Debug Snapshot (Dev Only)")
+                            .font(.headline)
+
+                        Text("Shows which signals were used vs missing for the current state.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(18)
+                .ambientPanel(tint: Color.white)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(isOn: $demoModeEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Demo Mode (Dev Only)")
+                            .font(.headline)
+                            Text(demoModeEnabled
+                                 ? "Using a stable sample dataset for predictable demos across all tabs."
+                                 : "Off. App reads live HealthKit data.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .onChange(of: demoModeEnabled) { _, newValue in
+                        healthStore.setDemoMode(enabled: newValue)
+                    }
+
+                    Picker("Demo Dataset", selection: demoDatasetBinding) {
+                        ForEach(AmbientHealthStore.DemoDataset.allCases) { dataset in
+                            Text(dataset.rawValue).tag(dataset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text("Developer note: Demo Mode locks snapshot, trends, and explanation context to deterministic sample values.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(18)
+                .ambientPanel(tint: Color.white)
+#endif
             }
             .padding(.bottom, 140)
         }
         .scrollIndicators(.visible)
         .safeAreaPadding(.bottom, 8)
+#if DEBUG
+        .onAppear {
+            let storedDataset = AmbientHealthStore.DemoDataset(rawValue: demoDatasetRaw) ?? .grounded
+            healthStore.setDemoDataset(storedDataset)
+            healthStore.setDemoMode(enabled: demoModeEnabled)
+        }
+#endif
     }
 
     private var sensitivityPresetBinding: Binding<AmbientHealthStore.SensitivityPreset> {
@@ -279,6 +526,46 @@ struct AmbientSettingsView: View {
 
         return "Active: \(enabled.joined(separator: ", "))"
     }
+
+    private func formattedTimestamp(_ date: Date?) -> String {
+        guard let date else { return "Not yet" }
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .abbreviated
+        let relativeText = relative.localizedString(for: date, relativeTo: Date())
+        return "\(timeOnly(date)) (\(relativeText))"
+    }
+
+    private func timeOnly(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func brightnessBinding(for state: ColorHealthState) -> Binding<Double> {
+        Binding<Double>(
+            get: { Double(piController.brightnessForState(state)) },
+            set: { newValue in
+                let resolved = Int(newValue.rounded())
+                piController.setBrightness(resolved, for: state)
+                if healthStore.displayedState == state {
+                    piController.sendHealthStateDebounced(state, brightness: resolved, delayMs: 320)
+                }
+            }
+        )
+    }
+
+#if DEBUG
+    private var demoDatasetBinding: Binding<AmbientHealthStore.DemoDataset> {
+        Binding(
+            get: { AmbientHealthStore.DemoDataset(rawValue: demoDatasetRaw) ?? healthStore.demoDataset },
+            set: { newValue in
+                demoDatasetRaw = newValue.rawValue
+                healthStore.setDemoDataset(newValue)
+            }
+        )
+    }
+#endif
 
     private func statusColor(for status: AmbientHealthStore.HealthSignalStatus) -> Color {
         switch status {

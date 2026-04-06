@@ -309,24 +309,24 @@ private func livePatternInsight(for state: ColorHealthState, snapshot: AmbientHe
     switch state {
     case .blue:
         return hasSupportiveRecoveryPattern(snapshot)
-            ? "The overall pattern leans supportive right now, with recovery looking steadier than strain."
-            : "The overall pattern still leans more supported than strained, even if not every signal looks perfect."
+            ? "Pattern-wise, this usually holds if sleep and recovery stay steady through the next day."
+            : "Pattern-wise, this can stay restored, but it is usually the first state to fade if recovery softens."
     case .green:
         return hasActivatedPattern(snapshot)
-            ? "The pattern stays fairly balanced overall, even though there are a few mild signs of activation in the background."
-            : "The pattern looks fairly even overall, without one signal clearly taking over."
+            ? "Pattern-wise, this reads stable, but small rises in strain can push it toward stressed quickly."
+            : "Pattern-wise, this is your balance state, where no single signal is clearly dominating."
     case .yellow:
         return hasRecoveryDrag(snapshot)
-            ? "The pattern looks low-energy overall, with some signs that recovery may also be dragging on momentum."
-            : "The pattern mostly points to low momentum rather than strong stress or heavier recovery strain."
+            ? "Pattern-wise, this often means low momentum plus mild recovery drag rather than strong stress."
+            : "Pattern-wise, this is mostly a movement-momentum dip, not a high-strain state."
     case .purple:
-        return "The pattern points more toward activation than fatigue, with several strain-related signals moving in the same direction."
+        return "Pattern-wise, this reflects an activation cluster and usually eases only when multiple strain signals settle together."
     case .gray:
-        return "The overall pattern stays close to your usual rhythm, without enough pull in one direction to clearly change states."
+        return "Pattern-wise, this is your baseline zone where readings can shift either way depending on the next few signals."
     case .red:
-        return "The pattern looks strongly activated overall, with several higher-strain signals reinforcing each other."
+        return "Pattern-wise, this is a stacked high-strain read and usually needs more than one signal to cool before it drops."
     case .orange:
-        return "The pattern points more toward depletion than activation, with recovery looking like the heavier part of the story."
+        return "Pattern-wise, this is a recovery-depletion cluster, where weaker recovery outweighs movement alone."
     }
 }
 
@@ -394,18 +394,18 @@ func genericExplanationBullets(for state: ColorHealthState) -> [String] {
 private func genericPatternInsight(for state: ColorHealthState) -> String {
     switch state {
     case .blue:
-        return "The app usually shows restored when sleep and recovery both look meaningfully better supported than baseline."
+        return "Restored usually appears when recovery stays consistently supportive, not just from one good signal."
     case .green:
-        return "The app usually shows grounded when the pattern looks steady, balanced, and not strongly pulled toward stress or fatigue."
+        return "Grounded usually appears when the signal mix looks balanced and stable over time."
     case .yellow:
-        return "The app usually shows low energy when movement is quiet and recovery or stress are not the stronger story."
+        return "Low Energy usually appears when movement momentum is quiet without stronger stress or recovery strain taking over."
     case .purple:
-        return "The app usually shows stressed when strain-related signals rise above baseline without workout context clearly explaining them."
+        return "Stressed usually appears when activation signals cluster and workout context does not fully explain them."
     case .gray:
-        return "The app usually shows neutral when signals stay close enough to baseline that no stronger mood state clearly wins."
+        return "Neutral usually appears when no state has enough combined evidence to clearly dominate."
     case .red:
-        return "The app usually shows overloaded when several stronger strain markers line up at once."
+        return "Overloaded usually appears when several higher-strain markers stack at the same time."
     case .orange:
-        return "The app usually shows drained when weaker recovery looks like the main story, more than movement alone."
+        return "Drained usually appears when weaker recovery is the main story, more than simple low movement."
     }
 }
