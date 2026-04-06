@@ -135,6 +135,8 @@ Debug builds include:
 ### Pi backend
 
 * `Ambient-Health-PI/` (FastAPI bridge for smart-bulb control)
+  * supports `POST /set_light`, `OPTIONS /set_light`, `GET /health`, `POST /turn_on`, and `POST /turn_off`
+  * includes warm-device reuse, fallback rediscovery, duplicate skipping, and latest-only request collapsing
 
 ## iOS Setup
 
