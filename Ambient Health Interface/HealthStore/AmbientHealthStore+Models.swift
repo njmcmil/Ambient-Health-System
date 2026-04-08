@@ -132,6 +132,7 @@ extension AmbientHealthStore {
         let latestSleepStage: SleepStageTrendPoint?
         let intradayStateTrail: [StateTrendPoint]
         let stateTrail: [StateTrendPoint]
+        let calendarStateTrail: [StateTrendPoint]
     }
 
     struct SleepStageBreakdown {

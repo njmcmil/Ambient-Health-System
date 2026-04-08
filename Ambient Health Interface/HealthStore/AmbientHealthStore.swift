@@ -28,6 +28,8 @@ final class AmbientHealthStore: ObservableObject {
     @Published private(set) var latestClassificationDebug: ClassificationDebugReport?
     @Published private(set) var isDemoModeEnabled = false
     @Published private(set) var demoDataset: DemoDataset = .grounded
+    @Published private(set) var liveIntradayStateTrail: [StateTrendPoint] = []
+    @Published private(set) var liveCalendarStateTrail: [StateTrendPoint] = []
 
     let healthStore = HKHealthStore()
     private let bpmUnit = HKUnit.count().unitDivided(by: .minute())
@@ -38,6 +40,10 @@ final class AmbientHealthStore: ObservableObject {
     private var authorizationCooldownUntil: Date?
     private var preservedLiveHistoryBeforeDemo: [ColorHealthState]?
     private var preservedLiveStateBeforeDemo: ColorHealthState?
+    private var preservedLiveSnapshotBeforeDemo: Snapshot?
+    private var preservedLiveTrendReportBeforeDemo: TrendReport?
+    private var preservedLiveBaselineBeforeDemo: BaselineSummary?
+    private var preservedLiveIntradayTrailBeforeDemo: [StateTrendPoint]?
 
     var displayedState: ColorHealthState {
         previewState ?? currentState
@@ -239,6 +245,10 @@ final class AmbientHealthStore: ObservableObject {
         if enabled {
             preservedLiveHistoryBeforeDemo = history
             preservedLiveStateBeforeDemo = currentState
+            preservedLiveSnapshotBeforeDemo = latestSnapshot
+            preservedLiveTrendReportBeforeDemo = trendReport
+            preservedLiveBaselineBeforeDemo = baselineSummary
+            preservedLiveIntradayTrailBeforeDemo = liveIntradayStateTrail
             applyDemoDataset()
         } else {
             if let preservedState = preservedLiveStateBeforeDemo {
@@ -247,17 +257,21 @@ final class AmbientHealthStore: ObservableObject {
             if let preservedHistory = preservedLiveHistoryBeforeDemo {
                 history = preservedHistory
             }
+            latestSnapshot = preservedLiveSnapshotBeforeDemo
+            trendReport = preservedLiveTrendReportBeforeDemo
+            baselineSummary = preservedLiveBaselineBeforeDemo
+            liveIntradayStateTrail = preservedLiveIntradayTrailBeforeDemo ?? []
             preservedLiveStateBeforeDemo = nil
             preservedLiveHistoryBeforeDemo = nil
+            preservedLiveSnapshotBeforeDemo = nil
+            preservedLiveTrendReportBeforeDemo = nil
+            preservedLiveBaselineBeforeDemo = nil
+            preservedLiveIntradayTrailBeforeDemo = nil
 
             // Immediately return the ambient object to the restored live state.
             if previewState == nil {
                 PiController.shared.sendHealthState(currentState)
             }
-
-            latestSnapshot = nil
-            trendReport = nil
-            baselineSummary = nil
             latestClassificationDebug = nil
             Task { [weak self] in
                 guard let self else { return }
@@ -327,6 +341,8 @@ final class AmbientHealthStore: ObservableObject {
 
             baselineSummary = loadedBaseline
             trendReport = loadedTrends
+            liveIntradayStateTrail = normalizedIntradayTrail(from: loadedTrends.intradayStateTrail, fallbackState: currentState)
+            liveCalendarStateTrail = loadedTrends.calendarStateTrail
             let evaluated = classify(snapshot: enrichedSnapshot, baseline: loadedBaseline)
             setState(evaluated, shouldSendToPi: true)
             latestClassificationDebug = buildClassificationDebugReport(snapshot: enrichedSnapshot, baseline: loadedBaseline)
@@ -377,6 +393,7 @@ final class AmbientHealthStore: ObservableObject {
 
         currentState = newState
         history.append(newState)
+        recordIntradayStateChange(newState)
 
         if history.count > 7 {
             history.removeFirst()
@@ -468,7 +485,8 @@ final class AmbientHealthStore: ObservableObject {
             sleepStages: sleepStageSeries,
             latestSleepStage: sleepStageSeries.last,
             intradayStateTrail: intradayStateTrail,
-            stateTrail: stateTrail
+            stateTrail: stateTrail,
+            calendarStateTrail: stateTrail
         )
 
         latestSnapshot = demoSnapshot
@@ -483,6 +501,56 @@ final class AmbientHealthStore: ObservableObject {
         previewState = nil
         setState(state, shouldSendToPi: true)
         latestClassificationDebug = buildClassificationDebugReport(snapshot: demoSnapshot, baseline: demoBaseline)
+    }
+
+    private func recordIntradayStateChange(_ state: ColorHealthState, at timestamp: Date = Date()) {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: timestamp)
+
+        liveIntradayStateTrail = liveIntradayStateTrail
+            .filter { calendar.isDate($0.date, inSameDayAs: timestamp) }
+            .sorted { $0.date < $1.date }
+
+        if liveIntradayStateTrail.isEmpty {
+            liveIntradayStateTrail = [StateTrendPoint(date: todayStart, state: state)]
+            return
+        }
+
+        if liveIntradayStateTrail.count == 1,
+           liveIntradayStateTrail[0].date == todayStart,
+           liveIntradayStateTrail[0].state == state {
+            return
+        }
+
+        if let last = liveIntradayStateTrail.last, last.state == state {
+            return
+        }
+
+        liveIntradayStateTrail.append(StateTrendPoint(date: timestamp, state: state))
+    }
+
+    private func normalizedIntradayTrail(
+        from points: [StateTrendPoint],
+        fallbackState: ColorHealthState
+    ) -> [StateTrendPoint] {
+        let calendar = Calendar.current
+        let now = Date()
+        let todayStart = calendar.startOfDay(for: now)
+
+        let todayPoints = points
+            .filter { calendar.isDate($0.date, inSameDayAs: now) }
+            .sorted { $0.date < $1.date }
+
+        guard !todayPoints.isEmpty else {
+            return [StateTrendPoint(date: todayStart, state: fallbackState)]
+        }
+
+        var normalized = todayPoints
+        if normalized[0].date > todayStart {
+            normalized.insert(StateTrendPoint(date: todayStart, state: normalized[0].state), at: 0)
+        }
+
+        return normalized
     }
 
     private func demoTemplate(for dataset: DemoDataset) -> DemoTemplate {

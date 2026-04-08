@@ -29,10 +29,10 @@ func nowLine(for state: ColorHealthState) -> String {
     switch state {
     case .blue: return "Your recent pattern feels more restored."
     case .green: return "Your recent pattern looks grounded and steady."
-    case .yellow: return "Your recent pattern suggests lower energy and movement."
+    case .yellow: return "Your recent pattern looks lower-energy and quieter."
     case .purple: return "Your current pattern suggests more stress than usual."
     case .gray: return "Your current pattern looks neutral and steady."
-    case .red: return "Several strain-related signals are elevated together."
-    case .orange: return "Your recent pattern suggests emotional and physical drain."
+    case .red: return "Your current pattern shows several strong strain signals at once."
+    case .orange: return "Your recent pattern suggests deeper fatigue and recovery strain."
     }
 }

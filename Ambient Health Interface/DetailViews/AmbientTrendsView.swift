@@ -12,9 +12,9 @@ struct AmbientTrendsView: View {
                 Text("Trends")
                     .font(.title2.weight(.semibold))
 
-                Text("A lighter weekly view of the signals behind your current mood read.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                Text("A lighter weekly view of the average signals behind your current mood read.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary.opacity(0.78))
 
                 if let previewState = healthStore.previewState {
                     AmbientPreviewStateCard(
@@ -38,7 +38,10 @@ struct AmbientTrendsView: View {
                             steps: trendReport.steps,
                             exerciseMinutes: trendReport.exerciseMinutes
                         )
-                        AmbientSleepDurationCard(points: trendReport.sleepHours)
+                        AmbientSleepDurationCard(
+                            points: trendReport.sleepHours,
+                            latestSleepPoint: trendReport.latestSleepStage
+                        )
                         AmbientSleepQualitySummaryCard(
                             points: trendReport.sleepStages,
                             latestSleepPoint: trendReport.latestSleepStage
@@ -148,8 +151,8 @@ private struct AmbientWeeklySummaryCard: View {
                     title: "Sleep",
                     detail: weeklyTrendSummary(
                         points: trendReport.sleepHours,
-                        lowMeaning: "lighter sleep than your recent norm",
-                        highMeaning: "more sleep than your recent norm",
+                        lowMeaning: "you've slept less than your recent norm",
+                        highMeaning: "you've slept more than your recent norm",
                         unit: "h",
                         formatter: { String(format: "%.1f", $0) },
                         includeLatest: false
@@ -159,10 +162,11 @@ private struct AmbientWeeklySummaryCard: View {
                     title: "Recovery",
                     detail: weeklyTrendSummary(
                         points: trendReport.heartRateVariability,
-                        lowMeaning: "recovery looked softer",
-                        highMeaning: "recovery looked stronger",
+                        lowMeaning: "recovery has looked softer",
+                        highMeaning: "recovery has looked stronger",
                         unit: "ms",
                         formatter: { Int($0).formatted() },
+                        averageLabel: "Weekly HRV average",
                         includeLatest: false
                     )
                 )
@@ -170,10 +174,11 @@ private struct AmbientWeeklySummaryCard: View {
                     title: "Calm Load",
                     detail: inverseWeeklyTrendSummary(
                         points: trendReport.restingHeartRate,
-                        lowMeaning: "your system looked calmer",
-                        highMeaning: "your system looked more activated",
+                        lowMeaning: "your system has looked calmer",
+                        highMeaning: "your system has looked more activated",
                         unit: "bpm",
                         formatter: { Int($0).formatted() },
+                        averageLabel: "Weekly resting heart rate average",
                         includeLatest: false
                     )
                 )
@@ -511,6 +516,7 @@ private struct AmbientHRVTrendCard: View {
 
 private struct AmbientSleepDurationCard: View {
     let points: [AmbientHealthStore.TrendPoint]
+    let latestSleepPoint: AmbientHealthStore.SleepStageTrendPoint?
 
     private let tint = Color(red: 0.73, green: 0.56, blue: 0.88)
 
@@ -522,7 +528,7 @@ private struct AmbientSleepDurationCard: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            let displayPoints = Array(meaningfulTrendPoints(points).suffix(5))
+            let displayPoints = latestAlignedSleepDurationPoints()
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 6) {
@@ -570,7 +576,7 @@ private struct AmbientSleepDurationCard: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.primary)
 
-                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
+                            Text(shortDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -635,6 +641,30 @@ private struct AmbientSleepDurationCard: View {
             return -1
         }
         return min(max(drift, -2), 1.5)
+    }
+
+    private func latestAlignedSleepDurationPoints() -> [AmbientHealthStore.TrendPoint] {
+        var recentPoints = Array(meaningfulTrendPoints(points).suffix(5))
+
+        guard let latestSleepPoint, latestSleepPoint.totalSleepHours > 0 else {
+            return recentPoints
+        }
+
+        let latestTrendPoint = AmbientHealthStore.TrendPoint(
+            date: latestSleepPoint.date,
+            value: latestSleepPoint.totalSleepHours
+        )
+
+        if let matchingIndex = recentPoints.lastIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: latestSleepPoint.date) }) {
+            recentPoints[matchingIndex] = latestTrendPoint
+        } else {
+            recentPoints.append(latestTrendPoint)
+            if recentPoints.count > 5 {
+                recentPoints.removeFirst(recentPoints.count - 5)
+            }
+        }
+
+        return recentPoints
     }
 }
 
@@ -789,7 +819,12 @@ private struct AmbientSleepQualitySummaryCard: View {
                 VStack(alignment: .leading, spacing: 10) {
                     AmbientSleepStageLegend()
 
-                    let weeklyPoints = Array(points.filter { $0.id != latest.id }.suffix(7))
+                    let calendar = Calendar.current
+                    let weeklyPoints = Array(
+                        points
+                            .filter { $0.id != latest.id && !calendar.isDateInToday($0.date) }
+                            .suffix(7)
+                    )
 
                     if !weeklyPoints.isEmpty {
                         DisclosureGroup(isExpanded: $showsWeeklySleepStages) {
@@ -812,7 +847,7 @@ private struct AmbientSleepQualitySummaryCard: View {
                     }
 
                     AmbientSleepStageMetricPanel(
-                        title: "Latest",
+                        title: "Latest • \(shortDayLabel(for: latest.date))",
                         subtitle: "\(String(format: "%.1f", latest.totalSleepHours)) h asleep",
                         corePercent: displayedCorePercent(for: latest),
                         deepPercent: latest.deepPercent,

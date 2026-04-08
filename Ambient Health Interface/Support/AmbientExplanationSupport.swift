@@ -1,5 +1,18 @@
 import SwiftUI
 
+private enum ExplanationSignal: Hashable {
+    case sleep
+    case hrv
+    case breathing
+    case restingHeartRate
+    case movement
+}
+
+private struct ExplanationDriver: Hashable {
+    let signal: ExplanationSignal
+    let text: String
+}
+
 /// State interpretation copy and ranking helpers used by explanation-style screens.
 func explanationBullets(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> [String] {
     guard let snapshot else {
@@ -11,20 +24,35 @@ func explanationBullets(for state: ColorHealthState, snapshot: AmbientHealthStor
         return genericExplanationBullets(for: state)
     }
 
-    var bullets = Array(drivers.prefix(1))
+    var bullets: [String] = []
+    var includedSignals = Set<ExplanationSignal>()
 
-    if let hrvLine = hrvExplanationLine(from: snapshot) {
+    if let primaryDriver = drivers.first {
+        bullets.append(primaryDriver.text)
+        includedSignals.insert(primaryDriver.signal)
+    }
+
+    if !includedSignals.contains(.hrv), let hrvLine = hrvExplanationLine(from: snapshot) {
         bullets.append(hrvLine)
+        includedSignals.insert(.hrv)
     }
 
-    if let breathingLine = breathingExplanationLine(from: snapshot) {
+    if !includedSignals.contains(.breathing), let breathingLine = breathingExplanationLine(from: snapshot) {
         bullets.append(breathingLine)
+        includedSignals.insert(.breathing)
     }
 
-    if let sleepStages = snapshot.sleepStages {
+    if !includedSignals.contains(.restingHeartRate), let restingLine = restingHeartRateExplanationLine(from: snapshot) {
+        bullets.append(restingLine)
+        includedSignals.insert(.restingHeartRate)
+    }
+
+    if !includedSignals.contains(.sleep), let sleepStages = snapshot.sleepStages {
         bullets.append(sleepStageInsightLine(from: sleepStages))
-    } else if let sleepHours = snapshot.sleepHours {
+        includedSignals.insert(.sleep)
+    } else if !includedSignals.contains(.sleep), let sleepHours = snapshot.sleepHours {
         bullets.append("Sleep was about \(String(format: "%.1f", sleepHours)) hours.")
+        includedSignals.insert(.sleep)
     }
 
     return Array((NSOrderedSet(array: bullets).array as? [String] ?? bullets).prefix(4))
@@ -226,51 +254,92 @@ private func breathingExplanationLine(from snapshot: AmbientHealthStore.Snapshot
     return "Breathing rate looks fairly mid-range, without a strong push toward calm or strain."
 }
 
+private func restingHeartRateExplanationLine(from snapshot: AmbientHealthStore.Snapshot) -> String? {
+    guard let resting = snapshot.restingHeartRate else { return nil }
+    if resting >= 78 {
+        return "Resting heart rate is running higher than your calmer range, which can make the body read as more activated or strained."
+    }
+    if resting <= 62 {
+        return "Resting heart rate is sitting in a calmer range, which usually supports a steadier overall read."
+    }
+    return "Resting heart rate looks fairly mid-range, without a strong pull toward calm or activation."
+}
+
 func patternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> String {
     guard let snapshot else { return genericPatternInsight(for: state) }
     return livePatternInsight(for: state, snapshot: snapshot)
 }
 
-private func explanationDrivers(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot) -> [String] {
-    var drivers: [String] = []
+private func explanationDrivers(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot) -> [ExplanationDriver] {
+    var drivers: [ExplanationDriver] = []
 
     if let sleep = snapshot.sleepHours {
         if sleep >= 9.2 {
-            drivers.append("You slept longer than usual, which can sometimes line up with slower momentum or your body still trying to recover.")
+            drivers.append(.init(
+                signal: .sleep,
+                text: "You slept longer than usual, which can sometimes line up with slower momentum or your body still trying to recover."
+            ))
         } else if sleep <= 6 {
-            drivers.append("You slept less than usual, which can make recovery feel less complete.")
+            drivers.append(.init(
+                signal: .sleep,
+                text: "You slept less than usual, which can make recovery feel less complete."
+            ))
         }
     }
 
     if let hrv = snapshot.heartRateVariability {
         if hrv <= 30 {
-            drivers.append("Your recovery signals look lower than usual right now, which can happen when your body is under more strain or has not bounced back yet.")
+            drivers.append(.init(
+                signal: .hrv,
+                text: "Your recovery signals look lower than usual right now, which can happen when your body is under more strain or has not bounced back yet."
+            ))
         } else if hrv >= 48 {
-            drivers.append("Your recovery signals look stronger than usual right now, which usually lines up with a steadier state.")
+            drivers.append(.init(
+                signal: .hrv,
+                text: "Your recovery signals look stronger than usual right now, which usually lines up with a steadier state."
+            ))
         }
     }
 
     if let breathing = snapshot.respiratoryRate {
         if breathing >= 17 {
-            drivers.append("Your breathing rate is running a little higher than your quieter range right now, which can happen when your system is more activated or strained.")
+            drivers.append(.init(
+                signal: .breathing,
+                text: "Your breathing rate is running a little higher than your quieter range right now, which can happen when your system is more activated or strained."
+            ))
         } else if breathing <= 13 {
-            drivers.append("Your breathing rate looks fairly settled right now, which usually fits a calmer overall pattern.")
+            drivers.append(.init(
+                signal: .breathing,
+                text: "Your breathing rate looks fairly settled right now, which usually fits a calmer overall pattern."
+            ))
         }
     }
 
     if let resting = snapshot.restingHeartRate {
         if resting >= 78 {
-            drivers.append("Your resting heart rate is running higher than your usual calm range right now, which can make your system look more activated or on edge.")
+            drivers.append(.init(
+                signal: .restingHeartRate,
+                text: "Your resting heart rate is running higher than your usual calm range right now, which can make your system look more activated or on edge."
+            ))
         } else if resting <= 62 {
-            drivers.append("Your resting heart rate is sitting in a calmer range right now, which usually supports a steadier or more recovered read.")
+            drivers.append(.init(
+                signal: .restingHeartRate,
+                text: "Your resting heart rate is sitting in a calmer range right now, which usually supports a steadier or more recovered read."
+            ))
         }
     }
 
     if let steps = snapshot.stepCountToday {
         if steps <= 3000 {
-            drivers.append("Your movement has been quieter than a more active day, which can make the app lean toward lower energy.")
+            drivers.append(.init(
+                signal: .movement,
+                text: "Your movement has been quieter than a more active day, which can make the app lean toward lower energy."
+            ))
         } else if steps >= 7000 {
-            drivers.append("Your movement has been more present than a quieter day, which supports a more grounded read.")
+            drivers.append(.init(
+                signal: .movement,
+                text: "Your movement has been more present than a quieter day, which supports a more grounded read."
+            ))
         }
     }
 
@@ -295,8 +364,8 @@ private func explanationDrivers(for state: ColorHealthState, snapshot: AmbientHe
     return ranked(drivers, preferred: preferred)
 }
 
-private func ranked(_ drivers: [String], preferred: [String]) -> [String] {
-    drivers.sorted { score($0, preferred: preferred) > score($1, preferred: preferred) }
+private func ranked(_ drivers: [ExplanationDriver], preferred: [String]) -> [ExplanationDriver] {
+    drivers.sorted { score($0.text, preferred: preferred) > score($1.text, preferred: preferred) }
 }
 
 private func score(_ driver: String, preferred: [String]) -> Int {

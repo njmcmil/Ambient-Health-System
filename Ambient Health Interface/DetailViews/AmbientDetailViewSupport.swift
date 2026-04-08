@@ -486,6 +486,7 @@ func weeklyTrendSummary(
     highMeaning: String,
     unit: String,
     formatter: (Double) -> String,
+    averageLabel: String = "Weekly average",
     includeLatest: Bool = true
 ) -> String {
     guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
@@ -498,16 +499,16 @@ func weeklyTrendSummary(
 
     if abs(delta) < max(average * 0.08, unit == "h" ? 0.35 : 2) {
         return includeLatest
-            ? "Weekly average is \(averageText). Current is \(latestText), so this week looks fairly steady."
-            : "Weekly average is \(averageText), and the week looks fairly steady."
+            ? "\(averageLabel) is \(averageText). Current is \(latestText), so this week looks fairly steady."
+            : "\(averageLabel) is \(averageText), and the week looks fairly steady."
     } else if delta > 0 {
         return includeLatest
-            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(highMeaning)."
-            : "Weekly average is \(averageText), and lately \(highMeaning)."
+            ? "\(averageLabel) is \(averageText). Current is \(latestText). Lately, \(highMeaning)."
+            : "\(averageLabel) is \(averageText). Lately, \(highMeaning)."
     } else {
         return includeLatest
-            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(lowMeaning)."
-            : "Weekly average is \(averageText), and lately \(lowMeaning)."
+            ? "\(averageLabel) is \(averageText). Current is \(latestText). Lately, \(lowMeaning)."
+            : "\(averageLabel) is \(averageText). Lately, \(lowMeaning)."
     }
 }
 
@@ -539,6 +540,7 @@ func inverseWeeklyTrendSummary(
     highMeaning: String,
     unit: String,
     formatter: (Double) -> String,
+    averageLabel: String = "Weekly average",
     includeLatest: Bool = true
 ) -> String {
     guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
@@ -551,16 +553,16 @@ func inverseWeeklyTrendSummary(
 
     if abs(delta) < max(average * 0.06, 2) {
         return includeLatest
-            ? "Weekly average is \(averageText). Current is \(latestText), so this week looks fairly steady."
-            : "Weekly average is \(averageText), and the week looks fairly steady."
+            ? "\(averageLabel) is \(averageText). Current is \(latestText), so this week looks fairly steady."
+            : "\(averageLabel) is \(averageText), and the week looks fairly steady."
     } else if delta > 0 {
         return includeLatest
-            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(highMeaning)."
-            : "Weekly average is \(averageText), and lately \(highMeaning)."
+            ? "\(averageLabel) is \(averageText). Current is \(latestText). Lately, \(highMeaning)."
+            : "\(averageLabel) is \(averageText). Lately, \(highMeaning)."
     } else {
         return includeLatest
-            ? "Weekly average is \(averageText). Current is \(latestText), and lately \(lowMeaning)."
-            : "Weekly average is \(averageText), and lately \(lowMeaning)."
+            ? "\(averageLabel) is \(averageText). Current is \(latestText). Lately, \(lowMeaning)."
+            : "\(averageLabel) is \(averageText). Lately, \(lowMeaning)."
     }
 }
 
@@ -635,7 +637,7 @@ func sleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> Str
         return "Not enough recent sleep-stage data yet."
     }
 
-    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent) }.reduce(0, +) / Double(points.count)
+    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(points.count)
     let averageDeep = points.map(\.deepPercent).reduce(0, +) / Double(points.count)
     let averageREM = points.map(\.remPercent).reduce(0, +) / Double(points.count)
     let averageAwake = points.map(\.awakePercent).reduce(0, +) / Double(points.count)
@@ -664,7 +666,7 @@ func calmerSleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) 
         return "There is not enough recent sleep-stage data to describe this gently yet."
     }
 
-    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent) }.reduce(0, +) / Double(points.count)
+    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(points.count)
     let averageDeep = points.map(\.deepPercent).reduce(0, +) / Double(points.count)
     let averageREM = points.map(\.remPercent).reduce(0, +) / Double(points.count)
     let averageAwake = points.map(\.awakePercent).reduce(0, +) / Double(points.count)

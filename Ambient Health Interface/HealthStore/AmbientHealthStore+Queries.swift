@@ -176,6 +176,50 @@ extension AmbientHealthStore {
             unit: HKUnit.secondUnit(with: .milli),
             days: days
         )
+        async let respiratoryRate = dailyAverageSeries(
+            for: .respiratoryRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: days
+        )
+        async let oxygenSaturation = dailyAverageSeries(
+            for: .oxygenSaturation,
+            unit: .percent(),
+            days: days
+        )
+        async let wristTemperature = dailyAverageSeries(
+            for: .appleSleepingWristTemperature,
+            unit: .degreeCelsius(),
+            days: days
+        )
+        let calendarDays = max(days, 21)
+        async let calendarSteps = dailyCumulativeSeries(for: .stepCount, unit: .count(), days: calendarDays)
+        async let calendarExerciseMinutes = dailyCumulativeSeries(for: .appleExerciseTime, unit: .minute(), days: calendarDays)
+        async let calendarRestingHeartRate = dailyAverageSeries(
+            for: .restingHeartRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: calendarDays
+        )
+        async let calendarHeartRateVariability = dailyAverageSeries(
+            for: .heartRateVariabilitySDNN,
+            unit: HKUnit.secondUnit(with: .milli),
+            days: calendarDays
+        )
+        async let calendarRespiratoryRate = dailyAverageSeries(
+            for: .respiratoryRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: calendarDays
+        )
+        async let calendarOxygenSaturation = dailyAverageSeries(
+            for: .oxygenSaturation,
+            unit: .percent(),
+            days: calendarDays
+        )
+        async let calendarWristTemperature = dailyAverageSeries(
+            for: .appleSleepingWristTemperature,
+            unit: .degreeCelsius(),
+            days: calendarDays
+        )
+        async let calendarSleepStages = dailySleepStageSeries(days: calendarDays)
         async let sleepStages = dailySleepStageSeries(days: days)
         async let latestSleepStage = latestSleepStagePoint()
         async let hourlySteps = hourlyCumulativeSeries(for: .stepCount, unit: .count())
@@ -193,6 +237,21 @@ extension AmbientHealthStore {
         let loadedExerciseMinutes = try await exerciseMinutes
         let loadedRestingHeartRate = try await restingHeartRate
         let loadedHeartRateVariability = try await heartRateVariability
+        let loadedRespiratoryRate = try await respiratoryRate
+        let loadedOxygenSaturation = try await oxygenSaturation.map { point in
+            TrendPoint(date: point.date, value: point.value * 100)
+        }
+        let loadedWristTemperature = try await wristTemperature
+        let loadedCalendarSteps = try await calendarSteps
+        let loadedCalendarExerciseMinutes = try await calendarExerciseMinutes
+        let loadedCalendarRestingHeartRate = try await calendarRestingHeartRate
+        let loadedCalendarHeartRateVariability = try await calendarHeartRateVariability
+        let loadedCalendarRespiratoryRate = try await calendarRespiratoryRate
+        let loadedCalendarOxygenSaturation = try await calendarOxygenSaturation.map { point in
+            TrendPoint(date: point.date, value: point.value * 100)
+        }
+        let loadedCalendarWristTemperature = try await calendarWristTemperature
+        let loadedCalendarSleepStages = try await calendarSleepStages
         let loadedSleepStages = try await sleepStages
         let loadedLatestSleepStage = try await latestSleepStage
         let loadedHourlySteps = try await hourlySteps
@@ -209,7 +268,20 @@ extension AmbientHealthStore {
             exerciseMinutes: loadedExerciseMinutes,
             sleepStages: loadedSleepStages,
             restingHeartRate: loadedRestingHeartRate,
-            heartRateVariability: loadedHeartRateVariability
+            heartRateVariability: loadedHeartRateVariability,
+            respiratoryRate: loadedRespiratoryRate,
+            oxygenSaturationPercent: loadedOxygenSaturation,
+            wristTemperatureCelsius: loadedWristTemperature
+        )
+        let calendarStateTrail = deriveStateTrail(
+            steps: loadedCalendarSteps,
+            exerciseMinutes: loadedCalendarExerciseMinutes,
+            sleepStages: loadedCalendarSleepStages,
+            restingHeartRate: loadedCalendarRestingHeartRate,
+            heartRateVariability: loadedCalendarHeartRateVariability,
+            respiratoryRate: loadedCalendarRespiratoryRate,
+            oxygenSaturationPercent: loadedCalendarOxygenSaturation,
+            wristTemperatureCelsius: loadedCalendarWristTemperature
         )
         let intradayStateTrail = deriveIntradayStateTrail(
             steps: loadedHourlySteps,
@@ -228,7 +300,8 @@ extension AmbientHealthStore {
             sleepStages: loadedSleepStages,
             latestSleepStage: loadedLatestSleepStage,
             intradayStateTrail: intradayStateTrail,
-            stateTrail: stateTrail
+            stateTrail: stateTrail,
+            calendarStateTrail: calendarStateTrail
         )
     }
 
@@ -565,7 +638,7 @@ extension AmbientHealthStore {
 
     private func latestCompletedSleepSession() async throws -> SleepSessionCluster? {
         let now = Date()
-        let queryStart = Calendar.current.date(byAdding: .hour, value: -36, to: now) ?? now
+        let queryStart = Calendar.current.date(byAdding: .hour, value: -60, to: now) ?? now
         return try await latestSleepSessionEnding(between: queryStart, and: now)
     }
 
@@ -605,7 +678,7 @@ extension AmbientHealthStore {
             return nil
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [])
         let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -647,7 +720,7 @@ extension AmbientHealthStore {
             return nil
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [])
         let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -768,9 +841,9 @@ extension AmbientHealthStore {
 
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
-        let queryStart = calendar.date(byAdding: .day, value: -(days + 1), to: todayStart)!
+        let queryStart = calendar.date(byAdding: .day, value: -(days + 3), to: todayStart)!
         let queryEnd = Date()
-        let predicate = HKQuery.predicateForSamples(withStart: queryStart, end: queryEnd, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: queryStart, end: queryEnd, options: [])
         let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
 
         let sessions: [SleepSessionCluster] = try await withCheckedThrowingContinuation { continuation in

@@ -330,7 +330,10 @@ extension AmbientHealthStore {
         exerciseMinutes: [TrendPoint],
         sleepStages: [SleepStageTrendPoint],
         restingHeartRate: [TrendPoint],
-        heartRateVariability: [TrendPoint]
+        heartRateVariability: [TrendPoint],
+        respiratoryRate: [TrendPoint],
+        oxygenSaturationPercent: [TrendPoint],
+        wristTemperatureCelsius: [TrendPoint]
     ) -> [StateTrendPoint] {
         let calendar = Calendar.current
         let stepsByDay = Dictionary(uniqueKeysWithValues: steps.map { (calendar.startOfDay(for: $0.date), $0) })
@@ -338,16 +341,27 @@ extension AmbientHealthStore {
         let sleepByDay = Dictionary(uniqueKeysWithValues: sleepStages.map { (calendar.startOfDay(for: $0.date), $0) })
         let restingByDay = Dictionary(uniqueKeysWithValues: restingHeartRate.map { (calendar.startOfDay(for: $0.date), $0) })
         let hrvByDay = Dictionary(uniqueKeysWithValues: heartRateVariability.map { (calendar.startOfDay(for: $0.date), $0) })
+        let respiratoryByDay = Dictionary(uniqueKeysWithValues: respiratoryRate.map { (calendar.startOfDay(for: $0.date), $0) })
+        let oxygenByDay = Dictionary(uniqueKeysWithValues: oxygenSaturationPercent.map { (calendar.startOfDay(for: $0.date), $0) })
+        let temperatureByDay = Dictionary(uniqueKeysWithValues: wristTemperatureCelsius.map { (calendar.startOfDay(for: $0.date), $0) })
 
         let allDays = Set(stepsByDay.keys)
             .union(exerciseByDay.keys)
             .union(sleepByDay.keys)
             .union(restingByDay.keys)
             .union(hrvByDay.keys)
+            .union(respiratoryByDay.keys)
+            .union(oxygenByDay.keys)
+            .union(temperatureByDay.keys)
             .sorted()
 
         return allDays.map { day in
             let sleepPoint = sleepByDay[day]
+            let restingValue = meaningfulCardioValue(restingByDay[day]?.value)
+            let hrvValue = meaningfulCardioValue(hrvByDay[day]?.value)
+            let respiratoryValue = meaningfulCardioValue(respiratoryByDay[day]?.value)
+            let oxygenValue = meaningfulCardioValue(oxygenByDay[day]?.value)
+            let temperatureValue = meaningfulTemperatureValue(temperatureByDay[day]?.value)
             let sleepBreakdown = sleepPoint.map {
                 SleepStageBreakdown(
                     totalSleepHours: $0.totalSleepHours,
@@ -368,12 +382,12 @@ extension AmbientHealthStore {
                 exerciseMinutesToday: exerciseByDay[day]?.value,
                 walkingRunningDistanceToday: nil,
                 flightsClimbedToday: nil,
-                currentHeartRate: restingByDay[day]?.value,
-                restingHeartRate: restingByDay[day]?.value,
-                heartRateVariability: hrvByDay[day]?.value,
-                respiratoryRate: nil,
-                oxygenSaturationPercent: nil,
-                wristTemperatureCelsius: nil,
+                currentHeartRate: restingValue,
+                restingHeartRate: restingValue,
+                heartRateVariability: hrvValue,
+                respiratoryRate: respiratoryValue,
+                oxygenSaturationPercent: oxygenValue,
+                wristTemperatureCelsius: temperatureValue,
                 sleepHours: sleepPoint?.totalSleepHours,
                 sleepStages: sleepBreakdown,
                 mindfulMinutesToday: nil,
@@ -382,6 +396,16 @@ extension AmbientHealthStore {
 
             return StateTrendPoint(date: day, state: classify(snapshot: snapshot, baseline: baselineSummary))
         }
+    }
+
+    private func meaningfulCardioValue(_ value: Double?) -> Double? {
+        guard let value, value > 0 else { return nil }
+        return value
+    }
+
+    private func meaningfulTemperatureValue(_ value: Double?) -> Double? {
+        guard let value else { return nil }
+        return abs(value) < 0.0001 ? nil : value
     }
 
     func deriveIntradayStateTrail(

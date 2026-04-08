@@ -26,6 +26,12 @@ struct AmbientExplanationView: View {
                             chips: chips,
                             tint: healthStore.displayedState.color
                         )
+
+                        if healthStore.previewState == nil {
+                            Text("Based on your current read.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary.opacity(0.78))
+                        }
                     }
 
                     if healthStore.previewState != nil {
@@ -43,10 +49,6 @@ struct AmbientExplanationView: View {
                         symbol: "text.bubble.fill",
                         tint: Color(red: 0.49, green: 0.72, blue: 0.96)
                     )
-
-                    Text("Based on your current read.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     let bullets = explanationBulletContent
 
@@ -100,6 +102,21 @@ struct AmbientExplanationView: View {
     private var historyTrail: [ColorHealthState] {
         if let previewState = healthStore.previewState {
             return Array(repeating: previewState, count: max(healthStore.history.count, 6))
+        }
+        if let dailyTrail = healthStore.trendReport?.stateTrail, !dailyTrail.isEmpty {
+            let calendar = Calendar.current
+            var states = dailyTrail.map(\.state)
+
+            if let lastDate = dailyTrail.last?.date, calendar.isDateInToday(lastDate) {
+                states[states.count - 1] = healthStore.displayedState
+            } else {
+                states.append(healthStore.displayedState)
+                if states.count > 7 {
+                    states.removeFirst(states.count - 7)
+                }
+            }
+
+            return states
         }
         return healthStore.history
     }

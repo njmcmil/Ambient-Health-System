@@ -116,7 +116,7 @@ struct AmbientSettingsView: View {
 
                 DisclosureGroup(isExpanded: $showsStatePreviewSection) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Preview a mood state on the phone and read the kind of health pattern that would usually create it. This does not change live data or send a fake state out.")
+                        Text("Preview a mood state on the phone and ambient object, and read the kind of health pattern that would usually create it. This does not change your live health data or saved state history.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
