@@ -67,7 +67,7 @@ struct AmbientHealthObjectView: View {
             AmbientBottomBar(selectedTab: $selectedTab)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
-                .padding(.bottom, 10)
+                .padding(.bottom, selectedTab == .now && healthStore.previewState != nil ? 16 : 10)
         }
         .onAppear {
             applySensitivityProfile()

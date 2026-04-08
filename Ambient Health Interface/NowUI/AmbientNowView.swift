@@ -46,17 +46,21 @@ struct AmbientNowView: View {
     @ObservedObject var healthStore: AmbientHealthStore
     let reduceIntensity: Bool
 
+    private var isPreviewing: Bool {
+        healthStore.previewState != nil
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: isPreviewing ? 8 : 12) {
             Spacer(minLength: 0)
 
             AmbientNowCalendarCard(healthStore: healthStore)
-            Spacer(minLength: 10)
+            Spacer(minLength: isPreviewing ? 4 : 10)
             AmbientReferenceView(
                 state: healthStore.displayedState,
                 reduceIntensity: reduceIntensity
             )
-            .padding(.top, 8)
+            .padding(.top, isPreviewing ? 2 : 8)
 
             VStack(spacing: 8) {
                 Text(healthStore.displayedState.title)
@@ -82,12 +86,13 @@ struct AmbientNowView: View {
                     .frame(maxWidth: 270)
                     .padding(.horizontal, 24)
             }
-            .padding(.top, 14)
+            .padding(.top, isPreviewing ? 8 : 14)
 
             AmbientActionButtons(healthStore: healthStore)
 
             Spacer()
         }
+        .offset(y: isPreviewing ? 8 : 0)
         .safeAreaPadding(.top, 10)
     }
 }
@@ -129,9 +134,9 @@ private struct AmbientActionButtons: View {
                     healthStore.setPreviewState(nil)
                 } label: {
                     Label("Live State", systemImage: "wave.3.right.circle")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16)
-                        .frame(height: 42)
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .frame(height: 38)
                 }
                 .buttonStyle(.bordered)
             }
