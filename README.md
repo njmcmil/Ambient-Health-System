@@ -2,43 +2,41 @@
 
 ## Overview
 
-Ambient Health System is a SwiftUI iPhone prototype that interprets Apple Health patterns into ambient mood-like states and maps those states to:
+Ambient Health System is a SwiftUI iPhone prototype that interprets Apple Health patterns into ambient, mood-like health states and maps those states to:
 
-* an on-screen animated ambient entity
-* a connected ambient light via Raspberry Pi bridge
+* an animated on-screen ambient entity
+* a connected ambient light through a Raspberry Pi bridge
 
-The project is intentionally designed as a calm, glanceable experience (not a clinical dashboard).  
-It combines baseline-relative analysis, explainable interpretation surfaces, and ambient visual output.
+The experience is intentionally built as a calm wellness interface, not a clinical dashboard.  
+It uses Apple Health trends, personal baseline context, and lightweight explanation surfaces to turn health data into something more readable and emotionally legible.
 
-## End-of-Semester Prototype Readiness
+## Wellness Framing
 
-As implemented now, this is a strong end-of-semester prototype because it has:
+Ambient Health is a wellness interpretation layer built on top of Apple Health data.
 
-* a clear core interaction loop (`Health data -> inferred state -> visual/physical ambient feedback`)
-* a complete multi-screen product flow (`Now`, `Explanation`, `Trends`, `Settings`)
-* non-trivial technical depth (HealthKit queries, baseline modeling, state classifier, hardware bridge)
-* user-facing accessibility controls and preview/testing tooling
+It is designed to:
 
-It is still a prototype (not production health software), but it is robust enough for a final academic demo.
+* help users notice recovery, strain, and energy patterns
+* surface plain-language context around those patterns
+* make health data feel glanceable and ambient
 
-## Current Implementation
+It is **not** intended to diagnose, treat, or provide medical advice.
 
-### Health-state engine
+## Core Product Loop
 
-The app uses Apple Health data and computes state from personal context, not raw one-off thresholds.
+The app is built around this flow:
 
-Current behavior includes:
+1. Read current and recent Apple Health signals.
+2. Compare those signals against the user's personal baseline.
+3. Translate that context into a current health state.
+4. Show that state through the animated entity, explanation, trends, and calendar memory.
+5. Optionally send the mapped color + brightness state to the Raspberry Pi light bridge.
 
-* personal baseline modeling over recent weeks
-* live snapshot + trend report interpretation
-* workout-aware suppression to avoid false stress reads during/after exercise
-* sensitivity tuning (`Gentle`, `Recommended`, `Responsive`, `Custom`)
-* preview mode isolated from live classification
-* developer-only demo datasets for deterministic presentation testing
+## Current Health-State Logic
 
-### Ambient states
+### State set
 
-The current state set is:
+The app currently uses these ambient states:
 
 * `Restored`
 * `Grounded`
@@ -50,69 +48,195 @@ The current state set is:
 
 Each state has:
 
-* unique color mapping
-* distinct motion/character mapping in the reference entity
-* target brightness for Pi light output
+* a color identity
+* a motion / character treatment in the ambient entity
+* a matching brightness target for the Pi light
+* a short Now-screen interpretation line
 
-### Reference entity design
+### Signals used
 
-The reference object is currently implemented as a living entity form (not a chart or static icon), with:
+The app can use these Apple Health signals when available:
 
-* layered organic lobes
-* dynamic core behavior
-* subtle state-specific character differences
-* reduced-intensity behavior when accessibility reduction is enabled
+* sleep duration
+* sleep-stage quality context
+* overnight breathing rate
+* oxygen saturation
+* sleeping wrist temperature
+* current heart rate
+* resting heart rate
+* heart rate variability (HRV)
+* step count
+* exercise minutes
+* active energy
+* distance walking / running
+* flights climbed
+* mindful minutes
+* recent workout context
 
-### UI surfaces
+### Baseline-relative interpretation
 
-* `Now`
-  * live state title + short interpretation line
-  * ambient entity
-  * state-aware calendar memory
-  * Pi connection indicator
-* `Explanation`
-  * `What This May Mean` (plain-language interpretation)
-  * `Pattern Insight` (non-duplicate pattern-level interpretation)
-  * preview-aware explanation behavior
-* `Trends`
-  * weekly trend cards for recovery, resting rhythm, movement, sleep duration, and sleep quality
-  * calmer-mode simplified trend presentation
-* `Settings`
-  * sensitivity controls
-  * state preview controls
-  * HealthKit status breakdown
-  * `Last refresh` + `Last successful Health read` timestamps
-  * ambient object send log (status + latency)
-  * per-state ambient brightness overrides for Pi output
-  * accessibility controls
-  * dev-only classifier debug snapshot + confidence readout
+The app does **not** rely on one-size-fits-all thresholds alone.
 
-### Accessibility features
+Current classification behavior includes:
 
-Current accessibility options include:
+* personal baseline modeling over recent weeks
+* live snapshot interpretation for the current day
+* weekly trend context
+* workout-aware suppression to avoid false stress reads during or shortly after exercise
+* adjustable sensitivity (`Gentle`, `Recommended`, `Responsive`, `Custom`)
+
+### Overnight signal ownership
+
+Overnight recovery signals are assigned to the **wake-up day**.
+
+That means:
+
+* sleep from Tuesday night into Wednesday morning belongs to **Wednesday**
+* breathing overnight from that same sleep session also belongs to **Wednesday**
+* sleep quality, oxygen, and sleeping wrist temperature from that session also belong to **Wednesday**
+
+This same wake-up-day logic is used across:
+
+* current live state interpretation
+* explanation surfaces
+* weekly trends
+* calendar history
+* tap-on-day calendar details
+
+### Current day vs past days
+
+The app treats the current day and previous days differently on purpose:
+
+* **Current day**
+  * uses the newest available data
+  * adapts to the user's current baseline
+  * stays gray / no-data if there is not enough meaningful signal yet
+* **Past days**
+  * preserve the state history already captured for that day
+  * show the dominant state that was most present across that day
+  * are not meant to be constantly reinterpreted through today's baseline
+
+## UI Surfaces
+
+### Now
+
+The `Now` screen currently includes:
+
+* the live state title
+* a short plain-language state line
+* the animated ambient entity
+* a 3-week calendar memory view
+* a Pi connection indicator
+
+#### Calendar behavior
+
+The calendar is designed to behave like a memory of recent health-state patterns:
+
+* **Today**
+  * shown as a segmented circle
+  * each segment reflects how much of the day a state has occupied
+  * the percentages are time-based, not just count-based
+* **Previous days**
+  * shown as one dominant daily state color
+  * represent the state that was most present that day
+* **No-data / future days**
+  * shown with a separate muted visual treatment
+  * do not fall back to fake neutral
+
+Users can move through:
+
+* `This Week`
+* `Last Week`
+* `2 Weeks Ago`
+
+### Explanation
+
+The `Explanation` screen is meant to make the live state understandable without becoming overly clinical.
+
+Current sections include:
+
+* `Most Relevant Signals`
+  * based on the current read
+  * highlights the strongest current or overnight signals affecting the state
+* `What This May Mean`
+  * plain-language interpretation of the live read
+* `Pattern Insight`
+  * weekly context using recent daily state history
+
+Explanation behavior now also accounts for:
+
+* no-data / low-data new-day moments
+* overnight signal wording like `Breathing Overnight`
+* state-specific language that is simpler and less system-like
+
+### Trends
+
+The `Trends` view is a weekly wellness view of the last 7 days.
+
+Current trends include:
+
+* recovery / HRV
+* resting heart rate
+* movement
+* sleep duration
+* sleep quality
+
+Trends are designed to:
+
+* show a past-week view rather than a single current reading
+* stay visually consistent across cards
+* keep missing days visible instead of silently collapsing them away
+* use calmer-mode-friendly summaries when accessibility settings are enabled
+
+### Settings
+
+The `Settings` screen currently includes:
+
+* sensitivity controls
+* state preview controls
+* HealthKit read status
+* last refresh / last successful read timestamps
+* Pi send log + connection info
+* per-state ambient brightness overrides
+* accessibility controls
+* developer-only debug snapshot and classifier reasoning
+
+The settings language has also been updated to more clearly explain:
+
+* that the app is a wellness interpretation
+* that overnight sleep signals apply to the wake-up day
+* that preview mode does not alter saved live history
+
+## Accessibility
+
+The app currently supports:
 
 * `Calmer Mode`
 * `Reduce Motion`
 * `Larger Text`
 * `Higher Contrast`
 
-These options are presentation-layer adjustments only and do not alter classification logic.
+These settings change presentation and readability, not the underlying classifier logic.
 
-### Preview mode
+## Preview and Demo Tooling
 
-State preview currently supports:
+### State Preview
 
-* previewing any state in UI
-* temporary Pi send for previewed state
-* returning to live state routing after preview ends
+`State Preview` is for testing and presentation:
 
-### Developer testing surfaces
+* it previews a chosen state on the phone
+* it can send that previewed state to the Pi ambient object
+* it does **not** rewrite saved live history
 
-Debug builds include:
+### Demo Mode
 
-* `Debug Snapshot (Dev Only)` with a detailed classifier reasoning report
-* one-line classifier confidence summary for faster diagnosis
-* `Demo Mode (Dev Only)` with selectable deterministic datasets for each health state
+`Demo Mode` provides deterministic demo datasets for presentation and debugging.
+
+It is kept separate from live history so it does not permanently contaminate:
+
+* calendar memory
+* weekly state history
+* live snapshot context
 
 ## Repository Structure
 
@@ -134,61 +258,35 @@ Debug builds include:
 
 ### Pi backend
 
-* `Ambient-Health-PI/` (FastAPI bridge for smart-bulb control)
-  * supports `POST /set_light`, `OPTIONS /set_light`, `GET /health`, `POST /turn_on`, and `POST /turn_off`
-  * includes warm-device reuse, fallback rediscovery, duplicate skipping, and latest-only request collapsing
+* `Ambient-Health-PI/`
+  * FastAPI bridge for smart-bulb control
+  * routes for `POST /set_light`, `OPTIONS /set_light`, `GET /health`, `POST /turn_on`, and `POST /turn_off`
+  * warm Kasa-device reuse, fallback rediscovery, duplicate skipping, and latest-only request collapsing
 
 ## iOS Setup
 
 1. Open [Ambient Health Interface.xcodeproj](/Users/nathanmcmillan/Desktop/XCodeFiles/Ambient%20Health%20Interface/Ambient%20Health%20Interface.xcodeproj) in Xcode.
 2. Run on a physical iPhone for real HealthKit behavior.
 3. Grant Health permissions when prompted.
-4. Ensure the iPhone can reach the Pi bridge URL on the same network.
+4. If you are using the Pi bridge, make sure the iPhone can reach the configured bridge URL.
 
 ## Pi Backend Setup
 
-From project root:
+The Pi bridge lives in [Ambient-Health-PI/README.md](/Users/nathanmcmillan/Desktop/XCodeFiles/Ambient%20Health%20Interface/Ambient-Health-PI/README.md).
 
-```bash
-cd Ambient-Health-PI
-make install
-cp .env.example .env
-```
+## Suggested Demo / Validation Checklist
 
-Set required values in `.env`:
+Before presenting or pushing a final build, the most important sanity checks are:
 
-```env
-USERNAME=your_email
-PASSWORD=your_password
-BULB_IP=your_bulb_ip
-```
-
-Run:
-
-```bash
-make run
-```
-
-Default server:
-
-```text
-http://0.0.0.0:8000
-```
-
-Set iOS bridge URL with environment `PI_BASE_URL` if needed.
-
-## Usage Flow
-
-1. Start Pi backend.
-2. Launch iPhone app.
-3. Connect Health and refresh.
-4. App computes live state from current signals + baseline context.
-5. App updates on-screen ambient entity and sends mapped state/brightness to Pi bridge.
-6. Use `State Preview` in Settings to test state-specific behavior.
+1. Verify a recent overnight sleep session lands on the **wake-up day** everywhere.
+2. Verify the current-day wheel fills by how long each state lasted.
+3. Verify previous-day calendar circles stay dominant-state only.
+4. Verify a brand-new day without enough data shows `No Data Yet` behavior instead of fake neutral.
+5. Verify the Pi bridge still responds to `OPTIONS /set_light` and `POST /set_light` if you are demoing the light.
 
 ## Notes and Limitations
 
-* Wellness-oriented interpretation only (not diagnostic or medical advice).
-* Signal quality depends on Apple Health data availability and recency.
-* Smart bulb still requires its own network onboarding outside the app.
-* Current hardware path is single-bridge / single-light oriented.
+* This is a wellness-oriented prototype, not a medical device.
+* Signal quality depends on Apple Health availability, recency, and what the user actually tracks.
+* Midnight boundary behavior is intentionally conservative when a new day has not gathered enough meaningful data yet.
+* The Pi hardware path is currently designed around one bridge and one bulb.
