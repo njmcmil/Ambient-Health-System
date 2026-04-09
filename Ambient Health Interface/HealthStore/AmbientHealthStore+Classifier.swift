@@ -58,7 +58,6 @@ extension AmbientHealthStore {
         let minutesSinceRecentWorkout = snapshot.minutesSinceRecentWorkout ?? .infinity
 
         let currentHeartRate = snapshot.currentHeartRate
-            ?? snapshot.restingHeartRate
             ?? baseline?.restingHeartRate?.mean
             ?? 75
 
@@ -333,29 +332,37 @@ extension AmbientHealthStore {
         heartRateVariability: [TrendPoint],
         respiratoryRate: [TrendPoint],
         oxygenSaturationPercent: [TrendPoint],
-        wristTemperatureCelsius: [TrendPoint]
+        wristTemperatureCelsius: [TrendPoint],
+        referenceBaseline: BaselineSummary? = nil
     ) -> [StateTrendPoint] {
         let calendar = Calendar.current
         let stepsByDay = Dictionary(uniqueKeysWithValues: steps.map { (calendar.startOfDay(for: $0.date), $0) })
         let exerciseByDay = Dictionary(uniqueKeysWithValues: exerciseMinutes.map { (calendar.startOfDay(for: $0.date), $0) })
-        let sleepByDay = Dictionary(uniqueKeysWithValues: sleepStages.map { (calendar.startOfDay(for: $0.date), $0) })
+        let sleepPairs: [(Date, SleepStageTrendPoint)] = sleepStages.compactMap { point in
+            guard point.totalSleepHours > 0 else { return nil }
+            return (calendar.startOfDay(for: point.date), point)
+        }
+        let sleepByDay = Dictionary(uniqueKeysWithValues: sleepPairs)
         let restingByDay = Dictionary(uniqueKeysWithValues: restingHeartRate.map { (calendar.startOfDay(for: $0.date), $0) })
         let hrvByDay = Dictionary(uniqueKeysWithValues: heartRateVariability.map { (calendar.startOfDay(for: $0.date), $0) })
         let respiratoryByDay = Dictionary(uniqueKeysWithValues: respiratoryRate.map { (calendar.startOfDay(for: $0.date), $0) })
         let oxygenByDay = Dictionary(uniqueKeysWithValues: oxygenSaturationPercent.map { (calendar.startOfDay(for: $0.date), $0) })
         let temperatureByDay = Dictionary(uniqueKeysWithValues: wristTemperatureCelsius.map { (calendar.startOfDay(for: $0.date), $0) })
 
-        let allDays = Set(stepsByDay.keys)
-            .union(exerciseByDay.keys)
-            .union(sleepByDay.keys)
-            .union(restingByDay.keys)
-            .union(hrvByDay.keys)
-            .union(respiratoryByDay.keys)
-            .union(oxygenByDay.keys)
-            .union(temperatureByDay.keys)
-            .sorted()
+        let allDays = Set(
+            steps.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) }
+        )
+        .union(exerciseMinutes.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(sleepByDay.keys)
+        .union(restingHeartRate.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(heartRateVariability.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(respiratoryRate.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(oxygenSaturationPercent.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(wristTemperatureCelsius.filter { abs($0.value) > 0.0001 }.map { calendar.startOfDay(for: $0.date) })
+        .sorted()
 
         return allDays.map { day in
+            let isToday = calendar.isDateInToday(day)
             let sleepPoint = sleepByDay[day]
             let restingValue = meaningfulCardioValue(restingByDay[day]?.value)
             let hrvValue = meaningfulCardioValue(hrvByDay[day]?.value)
@@ -382,7 +389,7 @@ extension AmbientHealthStore {
                 exerciseMinutesToday: exerciseByDay[day]?.value,
                 walkingRunningDistanceToday: nil,
                 flightsClimbedToday: nil,
-                currentHeartRate: restingValue,
+                currentHeartRate: nil,
                 restingHeartRate: restingValue,
                 heartRateVariability: hrvValue,
                 respiratoryRate: respiratoryValue,
@@ -394,7 +401,20 @@ extension AmbientHealthStore {
                 sampledAt: day
             )
 
-            return StateTrendPoint(date: day, state: classify(snapshot: snapshot, baseline: baselineSummary))
+            let rollingBaseline = rollingBaselineSummary(
+                for: day,
+                steps: steps,
+                exerciseMinutes: exerciseMinutes,
+                sleepStages: sleepStages,
+                restingHeartRate: restingHeartRate,
+                heartRateVariability: heartRateVariability,
+                respiratoryRate: respiratoryRate
+            )
+
+            let effectiveBaseline = isToday
+                ? (referenceBaseline ?? baselineSummary)
+                : (rollingBaseline ?? referenceBaseline ?? baselineSummary)
+            return StateTrendPoint(date: day, state: classify(snapshot: snapshot, baseline: effectiveBaseline))
         }
     }
 
@@ -413,7 +433,8 @@ extension AmbientHealthStore {
         exerciseMinutes: [TrendPoint],
         heartRate: [TrendPoint],
         respiratoryRate: [TrendPoint],
-        snapshot: Snapshot
+        snapshot: Snapshot,
+        baseline: BaselineSummary? = nil
     ) -> [StateTrendPoint] {
         let calendar = Calendar.current
         let stepsByHour = Dictionary(uniqueKeysWithValues: steps.map { ($0.date, $0) })
@@ -436,10 +457,10 @@ extension AmbientHealthStore {
                 exerciseMinutesToday: exerciseByHour[hour]?.value,
                 walkingRunningDistanceToday: snapshot.walkingRunningDistanceToday,
                 flightsClimbedToday: snapshot.flightsClimbedToday,
-                currentHeartRate: heartRateByHour[hour]?.value ?? snapshot.currentHeartRate,
+                currentHeartRate: meaningfulCardioValue(heartRateByHour[hour]?.value) ?? snapshot.currentHeartRate,
                 restingHeartRate: snapshot.restingHeartRate,
                 heartRateVariability: snapshot.heartRateVariability,
-                respiratoryRate: respiratoryByHour[hour]?.value ?? snapshot.respiratoryRate,
+                respiratoryRate: meaningfulCardioValue(respiratoryByHour[hour]?.value) ?? snapshot.respiratoryRate,
                 oxygenSaturationPercent: snapshot.oxygenSaturationPercent,
                 wristTemperatureCelsius: snapshot.wristTemperatureCelsius,
                 sleepHours: snapshot.sleepHours,
@@ -448,8 +469,281 @@ extension AmbientHealthStore {
                 sampledAt: calendar.date(bySettingHour: calendar.component(.hour, from: hour), minute: 0, second: 0, of: snapshot.sampledAt) ?? hour
             )
 
-            return StateTrendPoint(date: hour, state: classify(snapshot: reconstructed, baseline: baselineSummary))
+            return StateTrendPoint(date: hour, state: classify(snapshot: reconstructed, baseline: baseline ?? baselineSummary))
         }
+    }
+
+    func deriveCalendarStateTrail(
+        steps: [TrendPoint],
+        exerciseMinutes: [TrendPoint],
+        sleepStages: [SleepStageTrendPoint],
+        restingHeartRate: [TrendPoint],
+        heartRateVariability: [TrendPoint],
+        respiratoryRate: [TrendPoint],
+        oxygenSaturationPercent: [TrendPoint],
+        wristTemperatureCelsius: [TrendPoint],
+        hourlySteps: [TrendPoint],
+        hourlyExerciseMinutes: [TrendPoint],
+        hourlyHeartRate: [TrendPoint],
+        hourlyRespiratoryRate: [TrendPoint],
+        referenceBaseline: BaselineSummary? = nil
+    ) -> [StateTrendPoint] {
+        let calendar = Calendar.current
+        let stepsByDay = Dictionary(uniqueKeysWithValues: steps.map { (calendar.startOfDay(for: $0.date), $0) })
+        let exerciseByDay = Dictionary(uniqueKeysWithValues: exerciseMinutes.map { (calendar.startOfDay(for: $0.date), $0) })
+        let sleepPairs: [(Date, SleepStageTrendPoint)] = sleepStages.compactMap { point in
+            guard point.totalSleepHours > 0 else { return nil }
+            return (calendar.startOfDay(for: point.date), point)
+        }
+        let sleepByDay = Dictionary(uniqueKeysWithValues: sleepPairs)
+        let restingByDay = Dictionary(uniqueKeysWithValues: restingHeartRate.map { (calendar.startOfDay(for: $0.date), $0) })
+        let hrvByDay = Dictionary(uniqueKeysWithValues: heartRateVariability.map { (calendar.startOfDay(for: $0.date), $0) })
+        let respiratoryByDay = Dictionary(uniqueKeysWithValues: respiratoryRate.map { (calendar.startOfDay(for: $0.date), $0) })
+        let oxygenByDay = Dictionary(uniqueKeysWithValues: oxygenSaturationPercent.map { (calendar.startOfDay(for: $0.date), $0) })
+        let temperatureByDay = Dictionary(uniqueKeysWithValues: wristTemperatureCelsius.map { (calendar.startOfDay(for: $0.date), $0) })
+        let hourlyStepsByDay = Dictionary(grouping: hourlySteps) { calendar.startOfDay(for: $0.date) }
+        let hourlyExerciseByDay = Dictionary(grouping: hourlyExerciseMinutes) { calendar.startOfDay(for: $0.date) }
+        let hourlyHeartRateByDay = Dictionary(grouping: hourlyHeartRate) { calendar.startOfDay(for: $0.date) }
+        let hourlyRespiratoryByDay = Dictionary(grouping: hourlyRespiratoryRate) { calendar.startOfDay(for: $0.date) }
+
+        let allDays = Set(
+            steps.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) }
+        )
+        .union(exerciseMinutes.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(sleepByDay.keys)
+        .union(restingHeartRate.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(heartRateVariability.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(respiratoryRate.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(oxygenSaturationPercent.filter { $0.value > 0 }.map { calendar.startOfDay(for: $0.date) })
+        .union(wristTemperatureCelsius.filter { abs($0.value) > 0.0001 }.map { calendar.startOfDay(for: $0.date) })
+        .sorted()
+
+        return allDays.map { day in
+            let isToday = calendar.isDateInToday(day)
+            let dailySnapshot = snapshotForDay(
+                day,
+                stepsByDay: stepsByDay,
+                exerciseByDay: exerciseByDay,
+                sleepByDay: sleepByDay,
+                restingByDay: restingByDay,
+                hrvByDay: hrvByDay,
+                respiratoryByDay: respiratoryByDay,
+                oxygenByDay: oxygenByDay,
+                temperatureByDay: temperatureByDay
+            )
+
+            let rollingBaseline = rollingBaselineSummary(
+                for: day,
+                steps: steps,
+                exerciseMinutes: exerciseMinutes,
+                sleepStages: sleepStages,
+                restingHeartRate: restingHeartRate,
+                heartRateVariability: heartRateVariability,
+                respiratoryRate: respiratoryRate
+            )
+            let effectiveBaseline = isToday
+                ? (referenceBaseline ?? baselineSummary)
+                : (rollingBaseline ?? referenceBaseline ?? baselineSummary)
+
+            let hourlyStates = hourlyStatesForDay(
+                day,
+                dailySnapshot: dailySnapshot,
+                baseline: effectiveBaseline,
+                hourlySteps: hourlyStepsByDay[day] ?? [],
+                hourlyExerciseMinutes: hourlyExerciseByDay[day] ?? [],
+                hourlyHeartRate: hourlyHeartRateByDay[day] ?? [],
+                hourlyRespiratoryRate: hourlyRespiratoryByDay[day] ?? []
+            )
+
+            let state = dominantState(
+                from: hourlyStates,
+                fallback: classify(snapshot: dailySnapshot, baseline: effectiveBaseline)
+            )
+
+            return StateTrendPoint(date: day, state: state)
+        }
+    }
+
+    private func snapshotForDay(
+        _ day: Date,
+        stepsByDay: [Date: TrendPoint],
+        exerciseByDay: [Date: TrendPoint],
+        sleepByDay: [Date: SleepStageTrendPoint],
+        restingByDay: [Date: TrendPoint],
+        hrvByDay: [Date: TrendPoint],
+        respiratoryByDay: [Date: TrendPoint],
+        oxygenByDay: [Date: TrendPoint],
+        temperatureByDay: [Date: TrendPoint]
+    ) -> Snapshot {
+        let sleepPoint = sleepByDay[day]
+        let restingValue = meaningfulCardioValue(restingByDay[day]?.value)
+        let hrvValue = meaningfulCardioValue(hrvByDay[day]?.value)
+        let respiratoryValue = meaningfulCardioValue(respiratoryByDay[day]?.value)
+        let oxygenValue = meaningfulCardioValue(oxygenByDay[day]?.value)
+        let temperatureValue = meaningfulTemperatureValue(temperatureByDay[day]?.value)
+        let sleepBreakdown = sleepPoint.map {
+            SleepStageBreakdown(
+                totalSleepHours: $0.totalSleepHours,
+                inBedHours: $0.totalSleepHours + (($0.awakePercent / 100) * max($0.totalSleepHours, 0)),
+                awakeHours: ($0.awakePercent / 100) * max($0.totalSleepHours, 0),
+                coreHours: max(0, $0.totalSleepHours * max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) / 100),
+                deepHours: $0.totalSleepHours * ($0.deepPercent / 100),
+                remHours: $0.totalSleepHours * ($0.remPercent / 100),
+                unspecifiedSleepHours: 0
+            )
+        }
+
+        return Snapshot(
+            recentWorkoutMinutes: nil,
+            minutesSinceRecentWorkout: nil,
+            stepCountToday: stepsByDay[day]?.value,
+            activeEnergyToday: nil,
+            exerciseMinutesToday: exerciseByDay[day]?.value,
+            walkingRunningDistanceToday: nil,
+            flightsClimbedToday: nil,
+            currentHeartRate: nil,
+            restingHeartRate: restingValue,
+            heartRateVariability: hrvValue,
+            respiratoryRate: respiratoryValue,
+            oxygenSaturationPercent: oxygenValue,
+            wristTemperatureCelsius: temperatureValue,
+            sleepHours: sleepPoint?.totalSleepHours,
+            sleepStages: sleepBreakdown,
+            mindfulMinutesToday: nil,
+            sampledAt: day
+        )
+    }
+
+    private func hourlyStatesForDay(
+        _ day: Date,
+        dailySnapshot: Snapshot,
+        baseline: BaselineSummary?,
+        hourlySteps: [TrendPoint],
+        hourlyExerciseMinutes: [TrendPoint],
+        hourlyHeartRate: [TrendPoint],
+        hourlyRespiratoryRate: [TrendPoint]
+    ) -> [StateTrendPoint] {
+        let calendar = Calendar.current
+        let stepsByHour = Dictionary(uniqueKeysWithValues: hourlySteps.map { ($0.date, $0) })
+        let exerciseByHour = Dictionary(uniqueKeysWithValues: hourlyExerciseMinutes.map { ($0.date, $0) })
+        let heartRateByHour = Dictionary(uniqueKeysWithValues: hourlyHeartRate.map { ($0.date, $0) })
+        let respiratoryByHour = Dictionary(uniqueKeysWithValues: hourlyRespiratoryRate.map { ($0.date, $0) })
+
+        return (0..<24).compactMap { hourOffset in
+            guard let hour = calendar.date(byAdding: .hour, value: hourOffset, to: day) else { return nil }
+            let reconstructed = Snapshot(
+                recentWorkoutMinutes: nil,
+                minutesSinceRecentWorkout: nil,
+                stepCountToday: stepsByHour[hour]?.value ?? dailySnapshot.stepCountToday,
+                activeEnergyToday: dailySnapshot.activeEnergyToday,
+                exerciseMinutesToday: exerciseByHour[hour]?.value ?? dailySnapshot.exerciseMinutesToday,
+                walkingRunningDistanceToday: dailySnapshot.walkingRunningDistanceToday,
+                flightsClimbedToday: dailySnapshot.flightsClimbedToday,
+                currentHeartRate: meaningfulCardioValue(heartRateByHour[hour]?.value) ?? dailySnapshot.currentHeartRate,
+                restingHeartRate: dailySnapshot.restingHeartRate,
+                heartRateVariability: dailySnapshot.heartRateVariability,
+                respiratoryRate: meaningfulCardioValue(respiratoryByHour[hour]?.value) ?? dailySnapshot.respiratoryRate,
+                oxygenSaturationPercent: dailySnapshot.oxygenSaturationPercent,
+                wristTemperatureCelsius: dailySnapshot.wristTemperatureCelsius,
+                sleepHours: dailySnapshot.sleepHours,
+                sleepStages: dailySnapshot.sleepStages,
+                mindfulMinutesToday: nil,
+                sampledAt: hour
+            )
+
+            return StateTrendPoint(date: hour, state: classify(snapshot: reconstructed, baseline: baseline))
+        }
+    }
+
+    private func dominantState(from points: [StateTrendPoint], fallback: ColorHealthState) -> ColorHealthState {
+        guard !points.isEmpty else { return fallback }
+
+        let counts = Dictionary(grouping: points, by: \.state).mapValues(\.count)
+        let topCount = counts.values.max() ?? 0
+        let tiedStates = counts.filter { $0.value == topCount }.map(\.key)
+
+        if tiedStates.count == 1 {
+            return tiedStates[0]
+        }
+
+        return tiedStates.contains(fallback) ? fallback : (points.last?.state ?? fallback)
+    }
+
+    private func rollingBaselineSummary(
+        for day: Date,
+        steps: [TrendPoint],
+        exerciseMinutes: [TrendPoint],
+        sleepStages: [SleepStageTrendPoint],
+        restingHeartRate: [TrendPoint],
+        heartRateVariability: [TrendPoint],
+        respiratoryRate: [TrendPoint],
+        windowDays: Int = 21
+    ) -> BaselineSummary? {
+        let calendar = Calendar.current
+        let windowStart = calendar.date(byAdding: .day, value: -windowDays, to: day) ?? day
+
+        let stepValues = steps
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.value > 0 }
+            .map(\.value)
+        let exerciseValues = exerciseMinutes
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.value > 0 }
+            .map(\.value)
+        let restingValues = restingHeartRate
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.value > 0 }
+            .map(\.value)
+        let hrvValues = heartRateVariability
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.value > 0 }
+            .map(\.value)
+        let respiratoryValues = respiratoryRate
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.value > 0 }
+            .map(\.value)
+        let sleepHourValues = sleepStages
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.totalSleepHours > 0 }
+            .map(\.totalSleepHours)
+        let deepValues = sleepStages
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.totalSleepHours > 0 }
+            .map(\.deepPercent)
+        let remValues = sleepStages
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.totalSleepHours > 0 }
+            .map(\.remPercent)
+        let awakeValues = sleepStages
+            .filter { $0.date >= windowStart && $0.date < day }
+            .filter { $0.totalSleepHours > 0 }
+            .map(\.awakePercent)
+
+        let summary = BaselineSummary(
+            windowDays: windowDays,
+            restingHeartRate: metricBaseline(from: restingValues),
+            heartRateVariability: metricBaseline(from: hrvValues),
+            respiratoryRate: metricBaseline(from: respiratoryValues),
+            sleepHours: metricBaseline(from: sleepHourValues),
+            deepSleepPercent: metricBaseline(from: deepValues),
+            remSleepPercent: metricBaseline(from: remValues),
+            awakePercent: metricBaseline(from: awakeValues),
+            stepCount: metricBaseline(from: stepValues),
+            exerciseMinutes: metricBaseline(from: exerciseValues)
+        )
+
+        let hasAnyBaseline =
+            summary.restingHeartRate != nil ||
+            summary.heartRateVariability != nil ||
+            summary.respiratoryRate != nil ||
+            summary.sleepHours != nil ||
+            summary.deepSleepPercent != nil ||
+            summary.remSleepPercent != nil ||
+            summary.awakePercent != nil ||
+            summary.stepCount != nil ||
+            summary.exerciseMinutes != nil
+
+        return hasAnyBaseline ? summary : nil
     }
 
     /// Builds a detailed, developer-facing explanation of classifier behavior for a given snapshot.
@@ -467,7 +761,6 @@ extension AmbientHealthStore {
         let minutesSinceRecentWorkout = snapshot.minutesSinceRecentWorkout ?? .infinity
 
         let currentHeartRate = snapshot.currentHeartRate
-            ?? snapshot.restingHeartRate
             ?? baseline?.restingHeartRate?.mean
             ?? 75
 

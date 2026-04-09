@@ -487,17 +487,37 @@ func weeklyTrendSummary(
     unit: String,
     formatter: (Double) -> String,
     averageLabel: String = "Weekly average",
-    includeLatest: Bool = true
+    includeLatest: Bool = true,
+    baseline: AmbientHealthStore.MetricBaseline? = nil
 ) -> String {
     guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
         return "Not enough recent data yet."
     }
 
+    let values = points.map(\.value).filter { $0 > 0 }
     let delta = latest - average
     let averageText = "\(formatter(average)) \(unit)"
     let latestText = "\(formatter(latest)) \(unit)"
+    let rangeSpread = ((values.max() ?? average) - (values.min() ?? average))
+    let rangeThreshold = max(average * 0.10, unit == "h" ? 0.45 : 3)
+    let latestThreshold = max(average * 0.08, unit == "h" ? 0.35 : 2)
 
-    if abs(delta) < max(average * 0.08, unit == "h" ? 0.35 : 2) {
+    if let baseline {
+        let baselineDelta = average - baseline.mean
+        let baselineThreshold = max(baseline.mean * 0.08, unit == "h" ? 0.35 : 2)
+
+        if baselineDelta >= baselineThreshold {
+            return includeLatest
+                ? "\(averageLabel) is \(averageText). Current is \(latestText). Across this week, \(highMeaning)."
+                : "\(averageLabel) is \(averageText). Across this week, \(highMeaning)."
+        } else if baselineDelta <= -baselineThreshold {
+            return includeLatest
+                ? "\(averageLabel) is \(averageText). Current is \(latestText). Across this week, \(lowMeaning)."
+                : "\(averageLabel) is \(averageText). Across this week, \(lowMeaning)."
+        }
+    }
+
+    if rangeSpread < rangeThreshold || abs(delta) < latestThreshold {
         return includeLatest
             ? "\(averageLabel) is \(averageText). Current is \(latestText), so this week looks fairly steady."
             : "\(averageLabel) is \(averageText), and the week looks fairly steady."
@@ -518,14 +538,28 @@ func calmerWeeklyTrendSummary(
     highMeaning: String,
     unit: String,
     formatter: (Double) -> String,
-    includeLatest: Bool = true
+    includeLatest: Bool = true,
+    baseline: AmbientHealthStore.MetricBaseline? = nil
 ) -> String {
     guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
         return "There is not enough recent data to describe this gently yet."
     }
 
+    let values = points.map(\.value).filter { $0 > 0 }
     let delta = latest - average
-    if abs(delta) < max(average * 0.08, unit == "h" ? 0.35 : 2) {
+
+    if let baseline {
+        let baselineDelta = average - baseline.mean
+        let baselineThreshold = max(baseline.mean * 0.08, unit == "h" ? 0.35 : 2)
+        if baselineDelta >= baselineThreshold {
+            return highMeaning
+        } else if baselineDelta <= -baselineThreshold {
+            return lowMeaning
+        }
+    }
+
+    if ((values.max() ?? average) - (values.min() ?? average)) < max(average * 0.10, unit == "h" ? 0.45 : 3)
+        || abs(delta) < max(average * 0.08, unit == "h" ? 0.35 : 2) {
         return "This part of the week looks fairly steady."
     } else if delta > 0 {
         return highMeaning
@@ -541,17 +575,37 @@ func inverseWeeklyTrendSummary(
     unit: String,
     formatter: (Double) -> String,
     averageLabel: String = "Weekly average",
-    includeLatest: Bool = true
+    includeLatest: Bool = true,
+    baseline: AmbientHealthStore.MetricBaseline? = nil
 ) -> String {
     guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
         return "Not enough recent data yet."
     }
 
+    let values = points.map(\.value).filter { $0 > 0 }
     let delta = latest - average
     let averageText = "\(formatter(average)) \(unit)"
     let latestText = "\(formatter(latest)) \(unit)"
+    let rangeSpread = ((values.max() ?? average) - (values.min() ?? average))
+    let rangeThreshold = max(average * 0.08, 3)
+    let latestThreshold = max(average * 0.06, 2)
 
-    if abs(delta) < max(average * 0.06, 2) {
+    if let baseline {
+        let baselineDelta = average - baseline.mean
+        let baselineThreshold = max(baseline.mean * 0.06, 2)
+
+        if baselineDelta >= baselineThreshold {
+            return includeLatest
+                ? "\(averageLabel) is \(averageText). Current is \(latestText). Across this week, \(highMeaning)."
+                : "\(averageLabel) is \(averageText). Across this week, \(highMeaning)."
+        } else if baselineDelta <= -baselineThreshold {
+            return includeLatest
+                ? "\(averageLabel) is \(averageText). Current is \(latestText). Across this week, \(lowMeaning)."
+                : "\(averageLabel) is \(averageText). Across this week, \(lowMeaning)."
+        }
+    }
+
+    if rangeSpread < rangeThreshold || abs(delta) < latestThreshold {
         return includeLatest
             ? "\(averageLabel) is \(averageText). Current is \(latestText), so this week looks fairly steady."
             : "\(averageLabel) is \(averageText), and the week looks fairly steady."
@@ -572,14 +626,28 @@ func calmerInverseWeeklyTrendSummary(
     highMeaning: String,
     unit: String,
     formatter: (Double) -> String,
-    includeLatest: Bool = true
+    includeLatest: Bool = true,
+    baseline: AmbientHealthStore.MetricBaseline? = nil
 ) -> String {
     guard let average = weeklyAverage(for: points), let latest = latestMeaningfulPoint(in: points)?.value else {
         return "There is not enough recent data to describe this gently yet."
     }
 
+    let values = points.map(\.value).filter { $0 > 0 }
     let delta = latest - average
-    if abs(delta) < max(average * 0.06, 2) {
+
+    if let baseline {
+        let baselineDelta = average - baseline.mean
+        let baselineThreshold = max(baseline.mean * 0.06, 2)
+        if baselineDelta >= baselineThreshold {
+            return highMeaning
+        } else if baselineDelta <= -baselineThreshold {
+            return lowMeaning
+        }
+    }
+
+    if ((values.max() ?? average) - (values.min() ?? average)) < max(average * 0.08, 3)
+        || abs(delta) < max(average * 0.06, 2) {
         return "This part of the week looks fairly steady."
     } else if delta > 0 {
         return highMeaning
@@ -633,14 +701,16 @@ func calmerEnergySummary(
 }
 
 func sleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> String {
-    guard !points.isEmpty else {
+    let meaningfulPoints = points.filter { $0.totalSleepHours > 0.05 }
+
+    guard !meaningfulPoints.isEmpty else {
         return "Not enough recent sleep-stage data yet."
     }
 
-    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(points.count)
-    let averageDeep = points.map(\.deepPercent).reduce(0, +) / Double(points.count)
-    let averageREM = points.map(\.remPercent).reduce(0, +) / Double(points.count)
-    let averageAwake = points.map(\.awakePercent).reduce(0, +) / Double(points.count)
+    let averageCore = meaningfulPoints.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(meaningfulPoints.count)
+    let averageDeep = meaningfulPoints.map(\.deepPercent).reduce(0, +) / Double(meaningfulPoints.count)
+    let averageREM = meaningfulPoints.map(\.remPercent).reduce(0, +) / Double(meaningfulPoints.count)
+    let averageAwake = meaningfulPoints.map(\.awakePercent).reduce(0, +) / Double(meaningfulPoints.count)
 
     if averageDeep >= 15, averageREM >= 19, averageAwake <= 11 {
         return "Sleep has looked fairly restorative this week, with a healthy balance of core, deep, and REM sleep plus limited overnight awake time."
@@ -662,14 +732,16 @@ func sleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> Str
 }
 
 func calmerSleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> String {
-    guard !points.isEmpty else {
+    let meaningfulPoints = points.filter { $0.totalSleepHours > 0.05 }
+
+    guard !meaningfulPoints.isEmpty else {
         return "There is not enough recent sleep-stage data to describe this gently yet."
     }
 
-    let averageCore = points.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(points.count)
-    let averageDeep = points.map(\.deepPercent).reduce(0, +) / Double(points.count)
-    let averageREM = points.map(\.remPercent).reduce(0, +) / Double(points.count)
-    let averageAwake = points.map(\.awakePercent).reduce(0, +) / Double(points.count)
+    let averageCore = meaningfulPoints.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(meaningfulPoints.count)
+    let averageDeep = meaningfulPoints.map(\.deepPercent).reduce(0, +) / Double(meaningfulPoints.count)
+    let averageREM = meaningfulPoints.map(\.remPercent).reduce(0, +) / Double(meaningfulPoints.count)
+    let averageAwake = meaningfulPoints.map(\.awakePercent).reduce(0, +) / Double(meaningfulPoints.count)
 
     if averageDeep >= 15, averageREM >= 19, averageAwake <= 11 {
         return "Sleep quality looks fairly supportive this week."

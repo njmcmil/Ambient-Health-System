@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// The visible Trends charts should stay anchored to one true 7-day window.
+private let ambientWeeklyVisibleDays = 7
+
 /// Shows trend context behind the current state without turning the experience
 /// into a dense clinical dashboard.
 struct AmbientTrendsView: View {
@@ -12,7 +15,7 @@ struct AmbientTrendsView: View {
                 Text("Trends")
                     .font(.title2.weight(.semibold))
 
-                Text("A lighter weekly view of the average signals behind your current mood read.")
+                Text("A lighter weekly view of the last 7 days of signals behind your current mood read. This is a wellness interpretation, not a diagnosis.")
                     .font(.caption2)
                     .foregroundStyle(.secondary.opacity(0.78))
 
@@ -25,22 +28,31 @@ struct AmbientTrendsView: View {
                     if calmerModeEnabled {
                         AmbientCalmerTrendsView(
                             trendReport: trendReport,
-                            currentState: healthStore.displayedState
+                            currentState: healthStore.displayedState,
+                            baseline: healthStore.baselineSummary
                         )
                     } else {
                         AmbientWeeklySummaryCard(
                             trendReport: trendReport,
-                            currentState: healthStore.displayedState
+                            currentState: healthStore.displayedState,
+                            baseline: healthStore.baselineSummary
                         )
-                        AmbientHRVTrendCard(points: trendReport.heartRateVariability)
-                        AmbientHeartTrendCard(points: trendReport.restingHeartRate)
+                        AmbientHRVTrendCard(
+                            points: trendReport.heartRateVariability,
+                            baseline: healthStore.baselineSummary?.heartRateVariability
+                        )
+                        AmbientHeartTrendCard(
+                            points: trendReport.restingHeartRate,
+                            baseline: healthStore.baselineSummary?.restingHeartRate
+                        )
                         AmbientEnergyRhythmCard(
                             steps: trendReport.steps,
                             exerciseMinutes: trendReport.exerciseMinutes
                         )
                         AmbientSleepDurationCard(
                             points: trendReport.sleepHours,
-                            latestSleepPoint: trendReport.latestSleepStage
+                            latestSleepPoint: trendReport.latestSleepStage,
+                            baseline: healthStore.baselineSummary?.sleepHours
                         )
                         AmbientSleepQualitySummaryCard(
                             points: trendReport.sleepStages,
@@ -68,6 +80,7 @@ struct AmbientTrendsView: View {
 private struct AmbientCalmerTrendsView: View {
     let trendReport: AmbientHealthStore.TrendReport
     let currentState: ColorHealthState
+    let baseline: AmbientHealthStore.BaselineSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -85,7 +98,8 @@ private struct AmbientCalmerTrendsView: View {
                     highMeaning: "Recovery looks a little stronger than your recent norm.",
                     unit: "ms",
                     formatter: { Int($0).formatted() },
-                    includeLatest: false
+                    includeLatest: false,
+                    baseline: baseline?.heartRateVariability
                 ),
                 tint: .teal
             )
@@ -98,7 +112,8 @@ private struct AmbientCalmerTrendsView: View {
                     highMeaning: "Your system looks a little more activated than your recent norm.",
                     unit: "bpm",
                     formatter: { Int($0).formatted() },
-                    includeLatest: false
+                    includeLatest: false,
+                    baseline: baseline?.restingHeartRate
                 ),
                 tint: Color(red: 1.0, green: 0.20, blue: 0.22)
             )
@@ -120,7 +135,8 @@ private struct AmbientCalmerTrendsView: View {
                     highMeaning: "Sleep looks a little fuller than your recent norm.",
                     unit: "h",
                     formatter: { String(format: "%.1f", $0) },
-                    includeLatest: false
+                    includeLatest: false,
+                    baseline: baseline?.sleepHours
                 ),
                 tint: Color(red: 0.73, green: 0.56, blue: 0.88)
             )
@@ -137,6 +153,7 @@ private struct AmbientCalmerTrendsView: View {
 private struct AmbientWeeklySummaryCard: View {
     let trendReport: AmbientHealthStore.TrendReport
     let currentState: ColorHealthState
+    let baseline: AmbientHealthStore.BaselineSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -155,7 +172,8 @@ private struct AmbientWeeklySummaryCard: View {
                         highMeaning: "you've slept more than your recent norm",
                         unit: "h",
                         formatter: { String(format: "%.1f", $0) },
-                        includeLatest: false
+                        includeLatest: false,
+                        baseline: baseline?.sleepHours
                     )
                 )
                 AmbientSummaryRow(
@@ -167,7 +185,8 @@ private struct AmbientWeeklySummaryCard: View {
                         unit: "ms",
                         formatter: { Int($0).formatted() },
                         averageLabel: "Weekly HRV average",
-                        includeLatest: false
+                        includeLatest: false,
+                        baseline: baseline?.heartRateVariability
                     )
                 )
                 AmbientSummaryRow(
@@ -179,7 +198,8 @@ private struct AmbientWeeklySummaryCard: View {
                         unit: "bpm",
                         formatter: { Int($0).formatted() },
                         averageLabel: "Weekly resting heart rate average",
-                        includeLatest: false
+                        includeLatest: false,
+                        baseline: baseline?.restingHeartRate
                     )
                 )
                 AmbientSummaryRow(
@@ -232,7 +252,7 @@ private struct AmbientEnergyRhythmCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Energy Rhythm", symbol: "figure.walk.arrival", tint: .green)
 
-            Text("A quick read on weekly movement and momentum.")
+            Text("A quick read on movement and momentum over the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -247,7 +267,7 @@ private struct AmbientEnergyRhythmCard: View {
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            let displayPoints = Array(meaningfulTrendPoints(steps).suffix(5))
+            let displayPoints = weeklyTrendWindow(steps)
             let exerciseMap = Dictionary(uniqueKeysWithValues: exerciseMinutes.map { ($0.date, $0.value) })
 
             if !displayPoints.isEmpty {
@@ -255,12 +275,15 @@ private struct AmbientEnergyRhythmCard: View {
                     ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
                         let point = entry.element
                         let exercise = exerciseMap[point.date] ?? 0
-                        let intensity = energyIntensity(
-                            steps: point.value,
-                            exercise: exercise,
-                            stepSeries: displayPoints,
-                            exerciseSeries: exerciseMinutes
-                        )
+                        let hasData = point.value > 0 || exercise > 0
+                        let intensity = hasData
+                            ? energyIntensity(
+                                steps: point.value,
+                                exercise: exercise,
+                                stepSeries: displayPoints,
+                                exerciseSeries: exerciseMinutes
+                            )
+                            : 0.12
                         let dotSize = energyDotSize(for: intensity)
                         let haloSize = max(26, dotSize * 2.8)
                         let lineHeight = energyLineHeight(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
@@ -272,8 +295,8 @@ private struct AmbientEnergyRhythmCard: View {
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color.green.opacity(0.18 + (0.14 * intensity)),
-                                                Color.green.opacity(0.035)
+                                                hasData ? Color.green.opacity(0.18 + (0.14 * intensity)) : Color.white.opacity(0.06),
+                                                hasData ? Color.green.opacity(0.035) : Color.white.opacity(0.02)
                                             ],
                                             startPoint: .top,
                                             endPoint: .bottom
@@ -285,8 +308,8 @@ private struct AmbientEnergyRhythmCard: View {
                                             .fill(
                                                 RadialGradient(
                                                     colors: [
-                                                        Color.green.opacity(0.24 + (0.12 * intensity)),
-                                                        Color.green.opacity(0.08),
+                                                        hasData ? Color.green.opacity(0.24 + (0.12 * intensity)) : Color.white.opacity(0.12),
+                                                        hasData ? Color.green.opacity(0.08) : Color.white.opacity(0.04),
                                                         .clear
                                                     ],
                                                     center: .center,
@@ -298,7 +321,7 @@ private struct AmbientEnergyRhythmCard: View {
                                             .blur(radius: 8)
                                             .overlay {
                                                 Circle()
-                                                    .fill(Color.green.opacity(isLatest ? 0.94 : 0.82))
+                                                    .fill(hasData ? Color.green.opacity(isLatest ? 0.94 : 0.82) : Color.white.opacity(0.18))
                                                     .frame(width: dotSize, height: dotSize)
                                                     .overlay {
                                                         Circle()
@@ -307,7 +330,7 @@ private struct AmbientEnergyRhythmCard: View {
                                             }
                                     }
                                     .overlay(alignment: .bottom) {
-                                        if isLatest {
+                                        if isLatest && hasData {
                                             Image(systemName: "figure.walk.motion")
                                                 .font(.system(size: 10, weight: .semibold))
                                                 .foregroundStyle(Color.green.opacity(0.92))
@@ -317,11 +340,11 @@ private struct AmbientEnergyRhythmCard: View {
                             }
                             .frame(height: 58)
 
-                            Text("\(abbreviatedSteps(point.value))")
+                            Text(hasData ? "\(abbreviatedSteps(point.value))" : "--")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(hasData ? .primary : .secondary)
 
-                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
+                            Text(trendDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -359,7 +382,7 @@ private struct AmbientEnergyRhythmCard: View {
         stepSeries: [AmbientHealthStore.TrendPoint],
         exerciseSeries: [AmbientHealthStore.TrendPoint]
     ) -> CGFloat {
-        let stepValues = stepSeries.map(\.value)
+        let stepValues = stepSeries.map(\.value).filter { $0 > 0 }
         let exerciseValues = meaningfulTrendPoints(exerciseSeries).map(\.value)
 
         let stepScore: Double = {
@@ -395,22 +418,24 @@ private struct AmbientEnergyRhythmCard: View {
 
 private struct AmbientHRVTrendCard: View {
     let points: [AmbientHealthStore.TrendPoint]
+    let baseline: AmbientHealthStore.MetricBaseline?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Heart Rate Variability", symbol: "waveform.path", tint: .teal)
 
-            Text("A softer read on recovery and tension through the week.")
+            Text("A softer read on recovery and tension over the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            let displayPoints = Array(meaningfulTrendPoints(points).suffix(5))
+            let displayPoints = weeklyTrendWindow(points)
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 6) {
                     ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
                         let point = entry.element
-                        let intensity = normalizedValue(for: point.value, in: displayPoints)
+                        let hasData = point.value > 0
+                        let intensity = hasData ? normalizedValue(for: point.value, in: displayPoints) : 0.12
                         let pulseHeight = pulseHeight(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
                         let haloWidth = max(18, pulseHeight * 0.95)
                         let isLatest = entry.offset == displayPoints.count - 1
@@ -421,8 +446,8 @@ private struct AmbientHRVTrendCard: View {
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color.teal.opacity(0.18 + (0.14 * intensity)),
-                                                Color.teal.opacity(0.035)
+                                                hasData ? Color.teal.opacity(0.18 + (0.14 * intensity)) : Color.white.opacity(0.06),
+                                                hasData ? Color.teal.opacity(0.035) : Color.white.opacity(0.02)
                                             ],
                                             startPoint: .top,
                                             endPoint: .bottom
@@ -435,12 +460,12 @@ private struct AmbientHRVTrendCard: View {
                                     }
                                     .background {
                                         Capsule(style: .continuous)
-                                            .fill(Color.teal.opacity(0.11))
+                                            .fill(hasData ? Color.teal.opacity(0.11) : Color.white.opacity(0.08))
                                             .frame(width: haloWidth, height: max(28, pulseHeight + 10))
                                             .blur(radius: 10)
                                     }
                                     .overlay(alignment: .top) {
-                                        if isLatest {
+                                        if isLatest && hasData {
                                             Image(systemName: "waveform.path.ecg")
                                                 .font(.system(size: 10, weight: .semibold))
                                                 .foregroundStyle(Color.teal.opacity(0.92))
@@ -450,11 +475,11 @@ private struct AmbientHRVTrendCard: View {
                             }
                             .frame(height: 62)
 
-                            Text("\(Int(point.value)) ms")
+                            Text(hasData ? "\(Int(point.value)) ms" : "--")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(hasData ? .primary : .secondary)
 
-                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
+                            Text(trendDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -488,7 +513,8 @@ private struct AmbientHRVTrendCard: View {
                 highMeaning: "HRV has looked stronger than your recent norm, which usually points to steadier recovery",
                 unit: "ms",
                 formatter: { Int($0).formatted() },
-                includeLatest: false
+                includeLatest: false,
+                baseline: baseline
             ))
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -498,7 +524,7 @@ private struct AmbientHRVTrendCard: View {
     }
 
     private func normalizedValue(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
-        let values = points.map(\.value)
+        let values = points.map(\.value).filter { $0 > 0 }
         guard let minimum = values.min(), let maximum = values.max(), maximum - minimum >= 0.1 else { return 0.45 }
         let raw = (value - minimum) / (maximum - minimum)
         return CGFloat(min(max(raw, 0), 1))
@@ -517,6 +543,7 @@ private struct AmbientHRVTrendCard: View {
 private struct AmbientSleepDurationCard: View {
     let points: [AmbientHealthStore.TrendPoint]
     let latestSleepPoint: AmbientHealthStore.SleepStageTrendPoint?
+    let baseline: AmbientHealthStore.MetricBaseline?
 
     private let tint = Color(red: 0.73, green: 0.56, blue: 0.88)
 
@@ -524,7 +551,7 @@ private struct AmbientSleepDurationCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Sleep Duration", symbol: "moon.zzz.fill", tint: tint)
 
-            Text("A quiet weekly picture of how much sleep has landed each night.")
+            Text("A quiet weekly picture of how much sleep has landed across the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -534,7 +561,8 @@ private struct AmbientSleepDurationCard: View {
                 HStack(alignment: .bottom, spacing: 6) {
                     ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
                         let point = entry.element
-                        let intensity = normalizedValue(for: point.value, in: displayPoints)
+                        let hasData = point.value > 0
+                        let intensity = hasData ? normalizedValue(for: point.value, in: displayPoints) : 0.12
                         let moonSize = moonSize(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
                         let glowSize = max(26, moonSize * 2.2)
                         let drift = moonDrift(for: intensity)
@@ -546,8 +574,8 @@ private struct AmbientSleepDurationCard: View {
                                     .fill(
                                         RadialGradient(
                                             colors: [
-                                                tint.opacity(0.18 + (0.10 * intensity)),
-                                                tint.opacity(0.06),
+                                                hasData ? tint.opacity(0.18 + (0.10 * intensity)) : Color.white.opacity(0.10),
+                                                hasData ? tint.opacity(0.06) : Color.white.opacity(0.04),
                                                 .clear
                                             ],
                                             center: .center,
@@ -558,12 +586,12 @@ private struct AmbientSleepDurationCard: View {
                                     .frame(width: glowSize, height: glowSize)
                                     .blur(radius: 9)
 
-                                Image(systemName: isLatest ? "moon.zzz.fill" : "moon.stars.fill")
+                                Image(systemName: hasData ? (isLatest ? "moon.zzz.fill" : "moon.stars.fill") : "moon")
                                     .font(.system(size: moonSize, weight: .semibold))
-                                    .foregroundStyle(tint.opacity(isLatest ? 0.96 : 0.84))
+                                    .foregroundStyle(hasData ? tint.opacity(isLatest ? 0.96 : 0.84) : Color.white.opacity(0.42))
                                     .offset(x: drift * 0.35)
 
-                                if !isLatest {
+                                if !isLatest && hasData {
                                     Image(systemName: "sparkles")
                                         .font(.system(size: 7, weight: .semibold))
                                         .foregroundStyle(tint.opacity(0.70))
@@ -572,9 +600,9 @@ private struct AmbientSleepDurationCard: View {
                             }
                             .frame(height: 52)
 
-                            Text(String(format: "%.1f h", point.value))
+                            Text(hasData ? String(format: "%.1f h", point.value) : "--")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(hasData ? .primary : .secondary)
 
                             Text(shortDayLabel(for: point.date))
                                 .font(.caption2)
@@ -605,12 +633,13 @@ private struct AmbientSleepDurationCard: View {
             }
 
             Text(weeklyTrendSummary(
-                points: points,
+                points: displayPoints,
                 lowMeaning: "sleep duration has looked lighter than your recent norm",
                 highMeaning: "sleep duration has looked fuller than your recent norm",
                 unit: "h",
                 formatter: { String(format: "%.1f", $0) },
-                includeLatest: false
+                includeLatest: false,
+                baseline: baseline
             ))
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -620,7 +649,7 @@ private struct AmbientSleepDurationCard: View {
     }
 
     private func normalizedValue(for value: Double, in points: [AmbientHealthStore.TrendPoint]) -> CGFloat {
-        let values = points.map(\.value)
+        let values = points.map(\.value).filter { $0 > 0 }
         guard let minimum = values.min(), let maximum = values.max(), maximum - minimum >= 0.1 else { return 0.45 }
         let raw = (value - minimum) / (maximum - minimum)
         return CGFloat(min(max(raw, 0), 1))
@@ -644,7 +673,7 @@ private struct AmbientSleepDurationCard: View {
     }
 
     private func latestAlignedSleepDurationPoints() -> [AmbientHealthStore.TrendPoint] {
-        var recentPoints = Array(meaningfulTrendPoints(points).suffix(5))
+        var recentPoints = weeklyTrendWindow(points)
 
         guard let latestSleepPoint, latestSleepPoint.totalSleepHours > 0 else {
             return recentPoints
@@ -659,8 +688,8 @@ private struct AmbientSleepDurationCard: View {
             recentPoints[matchingIndex] = latestTrendPoint
         } else {
             recentPoints.append(latestTrendPoint)
-            if recentPoints.count > 5 {
-                recentPoints.removeFirst(recentPoints.count - 5)
+            if recentPoints.count > ambientWeeklyVisibleDays {
+                recentPoints.removeFirst(recentPoints.count - ambientWeeklyVisibleDays)
             }
         }
 
@@ -670,24 +699,26 @@ private struct AmbientSleepDurationCard: View {
 
 private struct AmbientHeartTrendCard: View {
     let points: [AmbientHealthStore.TrendPoint]
+    let baseline: AmbientHealthStore.MetricBaseline?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Resting Heart Rate", symbol: "heart.circle.fill", tint: Color(red: 1.0, green: 0.20, blue: 0.22))
 
-            Text("A softer view of whether your system has looked calmer or more activated.")
+            Text("A softer view of whether your system has looked calmer or more activated over the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            let displayPoints = Array(meaningfulTrendPoints(points).suffix(5))
+            let displayPoints = weeklyTrendWindow(points)
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 4) {
                     ForEach(Array(displayPoints.enumerated()), id: \.element.id) { entry in
                         let point = entry.element
-                        let intensity = normalizedIntensity(for: point.value, in: displayPoints)
+                        let hasData = point.value > 0
+                        let intensity = hasData ? normalizedIntensity(for: point.value, in: displayPoints) : 0.12
                         let heartSize = safeHeartSize(for: intensity, recencyIndex: entry.offset, totalCount: displayPoints.count)
-                        let glowColor = heartColor(for: intensity)
+                        let glowColor = hasData ? heartColor(for: intensity) : Color.white.opacity(0.45)
                         let haloSize = max(24, heartSize * 2.15)
                         let isLatest = entry.offset == displayPoints.count - 1
 
@@ -697,8 +728,8 @@ private struct AmbientHeartTrendCard: View {
                                     .fill(
                                         RadialGradient(
                                             colors: [
-                                                glowColor.opacity(0.24 + (0.12 * intensity)),
-                                                glowColor.opacity(0.08 + (0.06 * intensity)),
+                                                hasData ? glowColor.opacity(0.24 + (0.12 * intensity)) : Color.white.opacity(0.10),
+                                                hasData ? glowColor.opacity(0.08 + (0.06 * intensity)) : Color.white.opacity(0.04),
                                                 .clear
                                             ],
                                             center: .center,
@@ -710,22 +741,22 @@ private struct AmbientHeartTrendCard: View {
                                     .blur(radius: 7)
 
                                 Circle()
-                                    .fill(Color.white.opacity(0.04))
+                                    .fill(Color.white.opacity(hasData ? 0.04 : 0.02))
                                     .frame(width: max(20, heartSize * 1.55), height: max(20, heartSize * 1.55))
 
                                 Image(systemName: "heart.fill")
                                     .font(.system(size: heartSize, weight: .semibold))
                                     .foregroundStyle(glowColor)
-                                    .shadow(color: glowColor.opacity(0.24), radius: 8, y: 0)
+                                    .shadow(color: glowColor.opacity(hasData ? 0.24 : 0.08), radius: 8, y: 0)
                                     .scaleEffect(isLatest ? 1.03 : 1.0)
                             }
                             .frame(height: 42 + heartSize)
 
-                            Text("\(Int(point.value)) bpm")
+                            Text(hasData ? "\(Int(point.value.rounded()))" : "--")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(hasData ? .primary : .secondary)
 
-                            Text(isLatest ? "Today" : shortDayLabel(for: point.date))
+                            Text(trendDayLabel(for: point.date))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -761,7 +792,8 @@ private struct AmbientHeartTrendCard: View {
                 highMeaning: "your resting rhythm has looked a little more activated than your weekly norm",
                 unit: "bpm",
                 formatter: { Int($0).formatted() },
-                includeLatest: false
+                includeLatest: false,
+                baseline: baseline
             ))
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -802,6 +834,11 @@ private struct AmbientHeartTrendCard: View {
     }
 }
 
+/// Keeps chart layouts stable across the week, even when some days have no data yet.
+private func weeklyTrendWindow(_ points: [AmbientHealthStore.TrendPoint]) -> [AmbientHealthStore.TrendPoint] {
+    Array(points.suffix(ambientWeeklyVisibleDays))
+}
+
 private struct AmbientSleepQualitySummaryCard: View {
     let points: [AmbientHealthStore.SleepStageTrendPoint]
     let latestSleepPoint: AmbientHealthStore.SleepStageTrendPoint?
@@ -811,28 +848,39 @@ private struct AmbientSleepQualitySummaryCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Sleep Quality", symbol: "bed.double.circle.fill", tint: .blue)
 
-            Text("A weekly read on how restorative your sleep looked, compared with the latest night.")
+            Text("A weekly read on how restorative your sleep looked across the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
             if let latest = latestSleepPoint {
                 VStack(alignment: .leading, spacing: 10) {
-                    AmbientSleepStageLegend()
+                    AmbientSleepStageMetricPanel(
+                        title: "Latest • \(shortDayLabel(for: latest.date))",
+                        subtitle: "\(String(format: "%.1f", latest.totalSleepHours)) h asleep",
+                        corePercent: displayedCorePercent(for: latest),
+                        deepPercent: latest.deepPercent,
+                        remPercent: latest.remPercent,
+                        awakePercent: latest.awakePercent,
+                        tint: Color(red: 0.64, green: 0.78, blue: 1.0)
+                    )
 
                     let calendar = Calendar.current
                     let weeklyPoints = Array(
                         points
                             .filter { $0.id != latest.id && !calendar.isDateInToday($0.date) }
-                            .suffix(7)
+                            .suffix(ambientWeeklyVisibleDays)
                     )
 
                     if !weeklyPoints.isEmpty {
                         DisclosureGroup(isExpanded: $showsWeeklySleepStages) {
-                            AmbientSleepQualityWeekList(points: weeklyPoints)
+                            VStack(alignment: .leading, spacing: 10) {
+                                AmbientSleepStageLegend()
+                                AmbientSleepQualityWeekList(points: weeklyPoints)
+                            }
                                 .padding(.top, 8)
                         } label: {
                             HStack {
-                                Text("Show weekly sleep stages")
+                                Text("Show the rest of the week")
                                     .font(.footnote.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
@@ -846,25 +894,15 @@ private struct AmbientSleepQualitySummaryCard: View {
                         }
                     }
 
-                    AmbientSleepStageMetricPanel(
-                        title: "Latest • \(shortDayLabel(for: latest.date))",
-                        subtitle: "\(String(format: "%.1f", latest.totalSleepHours)) h asleep",
-                        corePercent: displayedCorePercent(for: latest),
-                        deepPercent: latest.deepPercent,
-                        remPercent: latest.remPercent,
-                        awakePercent: latest.awakePercent,
-                        tint: Color(red: 0.64, green: 0.78, blue: 1.0)
-                    )
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(sleepStageSummary(points: points))
-                    .font(.body)
-            }
+            Text(sleepStageSummary(points: points))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .ambientPanel(tint: .blue)
     }
 
 }
@@ -878,6 +916,10 @@ private struct AmbientSleepStageLegend: View {
             AmbientSleepLegendChip(title: "Awake", color: Color.white.opacity(0.8))
         }
     }
+}
+
+private func trendDayLabel(for date: Date) -> String {
+    Calendar.current.isDateInToday(date) ? "Today" : shortDayLabel(for: date)
 }
 
 private struct AmbientSleepLegendChip: View {

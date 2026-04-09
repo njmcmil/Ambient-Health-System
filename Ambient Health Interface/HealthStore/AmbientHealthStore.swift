@@ -12,6 +12,16 @@ import HealthKit
 /// - `AmbientHealthStore+Classifier.swift` turns health signals into mood states
 /// - `AmbientHealthStore+Queries.swift` handles HealthKit reads and trend loading
 final class AmbientHealthStore: ObservableObject {
+    private struct PersistedStatePoint: Codable {
+        let date: Date
+        let stateRawValue: String
+    }
+
+    private enum StorageKey {
+        static let calendarStateTrail = "ambient.calendarStateTrail"
+        static let intradayStateTrail = "ambient.intradayStateTrail"
+    }
+
     @Published private(set) var currentState: ColorHealthState = .gray
     @Published private(set) var previewState: ColorHealthState?
     @Published private(set) var history: [ColorHealthState] = []
@@ -44,9 +54,58 @@ final class AmbientHealthStore: ObservableObject {
     private var preservedLiveTrendReportBeforeDemo: TrendReport?
     private var preservedLiveBaselineBeforeDemo: BaselineSummary?
     private var preservedLiveIntradayTrailBeforeDemo: [StateTrendPoint]?
+    private var preservedLiveCalendarTrailBeforeDemo: [StateTrendPoint]?
 
     var displayedState: ColorHealthState {
         previewState ?? currentState
+    }
+
+    var ambientVisualState: ColorHealthState {
+        previewState ?? (hasMeaningfulCurrentRead ? currentState : .gray)
+    }
+
+    var hasMeaningfulCurrentRead: Bool {
+        guard let snapshot = latestSnapshot else { return false }
+
+        let hasSleep = (snapshot.sleepHours ?? 0) > 0
+        let hasSleepStages = (snapshot.sleepStages?.totalSleepHours ?? 0) > 0
+        let hasHRV = (snapshot.heartRateVariability ?? 0) > 0
+        let hasResting = (snapshot.restingHeartRate ?? 0) > 0
+        let hasCurrentHeart = snapshot.currentHeartRate != nil
+        let hasBreathing = (snapshot.respiratoryRate ?? 0) > 0
+        let hasOxygen = (snapshot.oxygenSaturationPercent ?? 0) > 0
+        let hasWristTemp = snapshot.wristTemperatureCelsius != nil
+        let hasMeaningfulSteps = (snapshot.stepCountToday ?? 0) >= 1_000
+        let hasMeaningfulExercise = (snapshot.exerciseMinutesToday ?? 0) >= 10
+        let hasMeaningfulActiveEnergy = (snapshot.activeEnergyToday ?? 0) >= 150
+        let hasMeaningfulMindful = (snapshot.mindfulMinutesToday ?? 0) >= 5
+
+        let overnightSignalCount = [
+            hasSleep,
+            hasSleepStages,
+            hasBreathing,
+            hasOxygen,
+            hasWristTemp
+        ]
+        .filter { $0 }
+        .count
+
+        let cardioSignalCount = [
+            hasHRV,
+            hasResting,
+            hasCurrentHeart
+        ]
+        .filter { $0 }
+        .count
+
+        let hasMeaningfulDayActivity = hasMeaningfulSteps
+            || hasMeaningfulExercise
+            || hasMeaningfulActiveEnergy
+            || hasMeaningfulMindful
+
+        return overnightSignalCount >= 1
+            || cardioSignalCount >= 2
+            || (hasMeaningfulDayActivity && cardioSignalCount >= 1)
     }
 
     // Keep the read set centralized so authorization and live refresh use the same signals.
@@ -77,6 +136,7 @@ final class AmbientHealthStore: ObservableObject {
 
     init() {
         authorizationState = HKHealthStore.isHealthDataAvailable() ? .notDetermined : .unavailable
+        restorePersistedStateHistory()
 
         guard HKHealthStore.isHealthDataAvailable() else { return }
 
@@ -161,8 +221,12 @@ final class AmbientHealthStore: ObservableObject {
             signalEntries = signalEntries(for: loadedSnapshot)
             authorizationState = signalEntries.contains(where: { $0.status == .readable }) ? .authorized : .partial
 
-            setState(classify(snapshot: loadedSnapshot, baseline: baselineSummary), shouldSendToPi: true)
-            latestClassificationDebug = buildClassificationDebugReport(snapshot: loadedSnapshot, baseline: baselineSummary)
+            if hasMeaningfulCurrentRead {
+                setState(classify(snapshot: loadedSnapshot, baseline: baselineSummary), shouldSendToPi: true)
+                latestClassificationDebug = buildClassificationDebugReport(snapshot: loadedSnapshot, baseline: baselineSummary)
+            } else {
+                latestClassificationDebug = nil
+            }
             finishRefreshPhase(for: refreshID)
 
             supplementalRefreshTask = Task { [weak self] in
@@ -211,7 +275,10 @@ final class AmbientHealthStore: ObservableObject {
         sensitivityProfile = profile
         sensitivityPreset = preset(matching: profile)
 
-        guard let latestSnapshot else { return }
+        guard let latestSnapshot, hasMeaningfulCurrentRead else {
+            latestClassificationDebug = nil
+            return
+        }
         let evaluated = classify(snapshot: latestSnapshot, baseline: baselineSummary)
         setState(evaluated, shouldSendToPi: shouldSendToPi)
         latestClassificationDebug = buildClassificationDebugReport(snapshot: latestSnapshot, baseline: baselineSummary)
@@ -222,7 +289,10 @@ final class AmbientHealthStore: ObservableObject {
         sensitivityProfile = resolvedProfile
         sensitivityPreset = preset
 
-        guard let latestSnapshot else { return }
+        guard let latestSnapshot, hasMeaningfulCurrentRead else {
+            latestClassificationDebug = nil
+            return
+        }
         let evaluated = classify(snapshot: latestSnapshot, baseline: baselineSummary)
         setState(evaluated, shouldSendToPi: true)
         latestClassificationDebug = buildClassificationDebugReport(snapshot: latestSnapshot, baseline: baselineSummary)
@@ -249,6 +319,7 @@ final class AmbientHealthStore: ObservableObject {
             preservedLiveTrendReportBeforeDemo = trendReport
             preservedLiveBaselineBeforeDemo = baselineSummary
             preservedLiveIntradayTrailBeforeDemo = liveIntradayStateTrail
+            preservedLiveCalendarTrailBeforeDemo = liveCalendarStateTrail
             applyDemoDataset()
         } else {
             if let preservedState = preservedLiveStateBeforeDemo {
@@ -261,22 +332,20 @@ final class AmbientHealthStore: ObservableObject {
             trendReport = preservedLiveTrendReportBeforeDemo
             baselineSummary = preservedLiveBaselineBeforeDemo
             liveIntradayStateTrail = preservedLiveIntradayTrailBeforeDemo ?? []
+            liveCalendarStateTrail = preservedLiveCalendarTrailBeforeDemo ?? []
             preservedLiveStateBeforeDemo = nil
             preservedLiveHistoryBeforeDemo = nil
             preservedLiveSnapshotBeforeDemo = nil
             preservedLiveTrendReportBeforeDemo = nil
             preservedLiveBaselineBeforeDemo = nil
             preservedLiveIntradayTrailBeforeDemo = nil
+            preservedLiveCalendarTrailBeforeDemo = nil
 
             // Immediately return the ambient object to the restored live state.
             if previewState == nil {
                 PiController.shared.sendHealthState(currentState)
             }
             latestClassificationDebug = nil
-            Task { [weak self] in
-                guard let self else { return }
-                await self.refresh()
-            }
         }
     }
 
@@ -334,18 +403,35 @@ final class AmbientHealthStore: ObservableObject {
             authorizationState = signalEntries.contains(where: { $0.status == .readable }) ? .authorized : .partial
 
             let loadedBaseline = try await loadBaselineSummary(days: 21)
-            let loadedTrends = try await loadTrendReport(days: 7, snapshot: enrichedSnapshot)
+            let loadedTrends = try await loadTrendReport(days: 7, snapshot: enrichedSnapshot, baseline: loadedBaseline)
 
             guard activeRefreshID == refreshID else { return }
             guard latestSnapshot?.sampledAt == enrichedSnapshot.sampledAt else { return }
 
             baselineSummary = loadedBaseline
-            trendReport = loadedTrends
-            liveIntradayStateTrail = normalizedIntradayTrail(from: loadedTrends.intradayStateTrail, fallbackState: currentState)
-            liveCalendarStateTrail = loadedTrends.calendarStateTrail
-            let evaluated = classify(snapshot: enrichedSnapshot, baseline: loadedBaseline)
-            setState(evaluated, shouldSendToPi: true)
-            latestClassificationDebug = buildClassificationDebugReport(snapshot: enrichedSnapshot, baseline: loadedBaseline)
+            rolloverIntradayTrailIfNeeded(for: Date())
+            let resolvedTrendReport = mergedTrendReportPreservingHistory(existing: trendReport, incoming: loadedTrends)
+            trendReport = resolvedTrendReport
+            let evaluatedState = hasMeaningfulCurrentRead
+                ? classify(snapshot: enrichedSnapshot, baseline: loadedBaseline)
+                : nil
+
+            liveIntradayStateTrail = evaluatedState.map {
+                normalizedIntradayTrail(
+                    from: resolvedTrendReport.intradayStateTrail,
+                    fallbackState: $0
+                )
+            } ?? []
+            liveCalendarStateTrail = trimCalendarStateTrail(resolvedTrendReport.calendarStateTrail)
+            persistStateTrail(liveIntradayStateTrail, forKey: StorageKey.intradayStateTrail)
+            persistStateTrail(liveCalendarStateTrail, forKey: StorageKey.calendarStateTrail)
+
+            if let evaluated = evaluatedState {
+                setState(evaluated, shouldSendToPi: true)
+                latestClassificationDebug = buildClassificationDebugReport(snapshot: enrichedSnapshot, baseline: loadedBaseline)
+            } else {
+                latestClassificationDebug = nil
+            }
         } catch {
             print("Supplemental HealthKit refresh failed:", error.localizedDescription)
         }
@@ -482,7 +568,19 @@ final class AmbientHealthStore: ObservableObject {
             sleepHours: sleepSeries,
             restingHeartRate: restingSeries,
             heartRateVariability: hrvSeries,
+            respiratoryRate: [],
+            oxygenSaturationPercent: [],
+            wristTemperatureCelsius: [],
             sleepStages: sleepStageSeries,
+            calendarSteps: stepsSeries,
+            calendarExerciseMinutes: exerciseSeries,
+            calendarSleepHours: sleepSeries,
+            calendarRestingHeartRate: restingSeries,
+            calendarHeartRateVariability: hrvSeries,
+            calendarRespiratoryRate: [],
+            calendarOxygenSaturationPercent: [],
+            calendarWristTemperatureCelsius: [],
+            calendarSleepStages: sleepStageSeries,
             latestSleepStage: sleepStageSeries.last,
             intradayStateTrail: intradayStateTrail,
             stateTrail: stateTrail,
@@ -507,12 +605,15 @@ final class AmbientHealthStore: ObservableObject {
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: timestamp)
 
+        rolloverIntradayTrailIfNeeded(for: timestamp)
+
         liveIntradayStateTrail = liveIntradayStateTrail
             .filter { calendar.isDate($0.date, inSameDayAs: timestamp) }
             .sorted { $0.date < $1.date }
 
         if liveIntradayStateTrail.isEmpty {
             liveIntradayStateTrail = [StateTrendPoint(date: todayStart, state: state)]
+            persistStateTrail(liveIntradayStateTrail, forKey: StorageKey.intradayStateTrail)
             return
         }
 
@@ -527,11 +628,12 @@ final class AmbientHealthStore: ObservableObject {
         }
 
         liveIntradayStateTrail.append(StateTrendPoint(date: timestamp, state: state))
+        persistStateTrail(liveIntradayStateTrail, forKey: StorageKey.intradayStateTrail)
     }
 
     private func normalizedIntradayTrail(
         from points: [StateTrendPoint],
-        fallbackState: ColorHealthState
+        fallbackState: ColorHealthState?
     ) -> [StateTrendPoint] {
         let calendar = Calendar.current
         let now = Date()
@@ -542,6 +644,7 @@ final class AmbientHealthStore: ObservableObject {
             .sorted { $0.date < $1.date }
 
         guard !todayPoints.isEmpty else {
+            guard let fallbackState else { return [] }
             return [StateTrendPoint(date: todayStart, state: fallbackState)]
         }
 
@@ -551,6 +654,181 @@ final class AmbientHealthStore: ObservableObject {
         }
 
         return normalized
+    }
+
+    private func mergedTrendReportPreservingHistory(
+        existing: TrendReport?,
+        incoming: TrendReport
+    ) -> TrendReport {
+        let existingCalendarTrail = existing?.calendarStateTrail ?? liveCalendarStateTrail
+        let mergedCalendarTrail = trimCalendarStateTrail(
+            mergeStateTrendPoints(existingCalendarTrail, incoming.calendarStateTrail)
+        )
+        let mergedStateTrail = derivedWeeklyStateTrail(from: mergedCalendarTrail)
+
+        return TrendReport(
+            steps: incoming.steps,
+            exerciseMinutes: incoming.exerciseMinutes,
+            sleepHours: incoming.sleepHours,
+            restingHeartRate: incoming.restingHeartRate,
+            heartRateVariability: incoming.heartRateVariability,
+            respiratoryRate: incoming.respiratoryRate,
+            oxygenSaturationPercent: incoming.oxygenSaturationPercent,
+            wristTemperatureCelsius: incoming.wristTemperatureCelsius,
+            sleepStages: incoming.sleepStages,
+            calendarSteps: incoming.calendarSteps,
+            calendarExerciseMinutes: incoming.calendarExerciseMinutes,
+            calendarSleepHours: incoming.calendarSleepHours,
+            calendarRestingHeartRate: incoming.calendarRestingHeartRate,
+            calendarHeartRateVariability: incoming.calendarHeartRateVariability,
+            calendarRespiratoryRate: incoming.calendarRespiratoryRate,
+            calendarOxygenSaturationPercent: incoming.calendarOxygenSaturationPercent,
+            calendarWristTemperatureCelsius: incoming.calendarWristTemperatureCelsius,
+            calendarSleepStages: incoming.calendarSleepStages,
+            latestSleepStage: incoming.latestSleepStage,
+            intradayStateTrail: incoming.intradayStateTrail,
+            stateTrail: mergedStateTrail,
+            calendarStateTrail: mergedCalendarTrail
+        )
+    }
+
+    private func mergeStateTrendPoints(_ existing: [StateTrendPoint], _ incoming: [StateTrendPoint]) -> [StateTrendPoint] {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let existingByDay = Dictionary(uniqueKeysWithValues: existing.map { (calendar.startOfDay(for: $0.date), $0) })
+        let incomingByDay = Dictionary(uniqueKeysWithValues: incoming.map { (calendar.startOfDay(for: $0.date), $0) })
+        let days = Set(existingByDay.keys).union(incomingByDay.keys).sorted()
+
+        return days.compactMap { day in
+            let point = day < todayStart ? (existingByDay[day] ?? incomingByDay[day]) : (incomingByDay[day] ?? existingByDay[day])
+            return point
+        }
+    }
+
+    private func derivedWeeklyStateTrail(from calendarTrail: [StateTrendPoint], days: Int = 7) -> [StateTrendPoint] {
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let relevant = calendarTrail
+            .filter { $0.date <= todayStart }
+            .sorted { $0.date < $1.date }
+        return Array(relevant.suffix(days))
+    }
+
+    private func trimCalendarStateTrail(_ points: [StateTrendPoint], maxDays: Int = 21) -> [StateTrendPoint] {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let grouped = Dictionary(uniqueKeysWithValues: points.map { (calendar.startOfDay(for: $0.date), $0) })
+        let trimmedDays = grouped.keys
+            .filter { $0 <= todayStart }
+            .sorted()
+            .suffix(maxDays)
+
+        return trimmedDays.compactMap { grouped[$0] }
+    }
+
+    private func rolloverIntradayTrailIfNeeded(for timestamp: Date) {
+        let calendar = Calendar.current
+        guard let firstDate = liveIntradayStateTrail.first?.date else { return }
+        guard !calendar.isDate(firstDate, inSameDayAs: timestamp) else { return }
+
+        if let archivedPoint = archivedStatePoint(from: liveIntradayStateTrail) {
+            liveCalendarStateTrail = trimCalendarStateTrail(
+                upsertingStatePoint(archivedPoint, into: liveCalendarStateTrail)
+            )
+            persistStateTrail(liveCalendarStateTrail, forKey: StorageKey.calendarStateTrail)
+        }
+
+        liveIntradayStateTrail = []
+        persistStateTrail(liveIntradayStateTrail, forKey: StorageKey.intradayStateTrail)
+    }
+
+    private func archivedStatePoint(from points: [StateTrendPoint]) -> StateTrendPoint? {
+        let calendar = Calendar.current
+        let sortedPoints = points.sorted { $0.date < $1.date }
+        guard let firstPoint = sortedPoints.first else { return nil }
+
+        let dayStart = calendar.startOfDay(for: firstPoint.date)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        var timeline = sortedPoints
+
+        if let first = timeline.first, first.date > dayStart {
+            timeline.insert(StateTrendPoint(date: dayStart, state: first.state), at: 0)
+        }
+
+        var durations: [ColorHealthState: TimeInterval] = [:]
+
+        for index in timeline.indices {
+            let segmentStart = max(timeline[index].date, dayStart)
+            let segmentEnd = index + 1 < timeline.count ? min(timeline[index + 1].date, dayEnd) : dayEnd
+            let duration = max(0, segmentEnd.timeIntervalSince(segmentStart))
+            durations[timeline[index].state, default: 0] += duration
+        }
+
+        guard let maxDuration = durations.values.max() else {
+            return StateTrendPoint(date: dayStart, state: timeline.last?.state ?? .gray)
+        }
+
+        let tiedStates = durations
+            .filter { $0.value == maxDuration }
+            .map(\.key)
+
+        let dominantState = tiedStates.count == 1
+            ? tiedStates[0]
+            : (timeline.last?.state ?? .gray)
+
+        return StateTrendPoint(date: dayStart, state: dominantState)
+    }
+
+    private func restorePersistedStateHistory() {
+        let restoredCalendar = loadPersistedStateTrail(forKey: StorageKey.calendarStateTrail)
+        let restoredIntraday = loadPersistedStateTrail(forKey: StorageKey.intradayStateTrail)
+
+        if let archivedPoint = archivedStatePoint(from: restoredIntraday) {
+            liveCalendarStateTrail = trimCalendarStateTrail(
+                upsertingStatePoint(archivedPoint, into: restoredCalendar)
+            )
+        } else {
+            liveCalendarStateTrail = trimCalendarStateTrail(restoredCalendar)
+        }
+
+        let calendar = Calendar.current
+        let today = Date()
+        liveIntradayStateTrail = restoredIntraday
+            .filter { calendar.isDate($0.date, inSameDayAs: today) }
+            .sorted { $0.date < $1.date }
+
+        persistStateTrail(liveCalendarStateTrail, forKey: StorageKey.calendarStateTrail)
+        persistStateTrail(liveIntradayStateTrail, forKey: StorageKey.intradayStateTrail)
+    }
+
+    private func loadPersistedStateTrail(forKey key: String) -> [StateTrendPoint] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+
+        do {
+            let decoded = try JSONDecoder().decode([PersistedStatePoint].self, from: data)
+            return decoded.compactMap { point in
+                guard let state = ColorHealthState(rawValue: point.stateRawValue) else { return nil }
+                return StateTrendPoint(date: point.date, state: state)
+            }
+            .sorted { $0.date < $1.date }
+        } catch {
+            return []
+        }
+    }
+
+    private func persistStateTrail(_ points: [StateTrendPoint], forKey key: String) {
+        let serializable = points.map {
+            PersistedStatePoint(date: $0.date, stateRawValue: $0.state.rawValue)
+        }
+
+        guard let data = try? JSONEncoder().encode(serializable) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func upsertingStatePoint(_ point: StateTrendPoint, into points: [StateTrendPoint]) -> [StateTrendPoint] {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: point.date)
+        let filtered = points.filter { !calendar.isDate($0.date, inSameDayAs: day) }
+        return (filtered + [StateTrendPoint(date: day, state: point.state)]).sorted { $0.date < $1.date }
     }
 
     private func demoTemplate(for dataset: DemoDataset) -> DemoTemplate {
@@ -741,9 +1019,11 @@ final class AmbientHealthStore: ObservableObject {
     func signalEntries(for snapshot: Snapshot?) -> [HealthSignalEntry] {
         let labels = [
             ("Sleep", snapshot?.sleepHours != nil || snapshot?.sleepStages != nil),
+            ("Current Heart Rate", snapshot?.currentHeartRate != nil),
             ("Resting Heart Rate", snapshot?.restingHeartRate != nil),
             ("HRV", snapshot?.heartRateVariability != nil),
             ("Breathing", snapshot?.respiratoryRate != nil),
+            ("Oxygen Saturation", snapshot?.oxygenSaturationPercent != nil),
             ("Wrist Temperature", snapshot?.wristTemperatureCelsius != nil),
             ("Steps", snapshot?.stepCountToday != nil),
             ("Exercise", snapshot?.exerciseMinutesToday != nil),

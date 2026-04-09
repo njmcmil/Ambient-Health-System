@@ -57,13 +57,13 @@ struct AmbientNowView: View {
             AmbientNowCalendarCard(healthStore: healthStore)
             Spacer(minLength: isPreviewing ? 4 : 10)
             AmbientReferenceView(
-                state: healthStore.displayedState,
+                state: healthStore.ambientVisualState,
                 reduceIntensity: reduceIntensity
             )
             .padding(.top, isPreviewing ? 2 : 8)
 
             VStack(spacing: 8) {
-                Text(healthStore.displayedState.title)
+                Text(currentStateTitle)
                     .font(.system(size: 28, weight: .medium, design: .rounded))
                     .tracking(0.2)
                     .foregroundStyle(.primary)
@@ -77,7 +77,7 @@ struct AmbientNowView: View {
                         .background(healthStore.displayedState.color.opacity(0.12), in: Capsule())
                 }
 
-                Text(nowLine(for: healthStore.displayedState))
+                Text(currentNowSummary)
                     .font(.callout)
                     .lineSpacing(2)
                     .foregroundStyle(.secondary)
@@ -94,6 +94,24 @@ struct AmbientNowView: View {
         }
         .offset(y: isPreviewing ? 8 : 0)
         .safeAreaPadding(.top, 10)
+    }
+
+    private var currentNowSummary: String {
+        if isPreviewing {
+            return nowLine(for: healthStore.displayedState)
+        }
+
+        return healthStore.hasMeaningfulCurrentRead
+            ? nowLine(for: healthStore.displayedState)
+            : "No recent data yet for today's live read."
+    }
+
+    private var currentStateTitle: String {
+        if isPreviewing {
+            return healthStore.displayedState.title
+        }
+
+        return healthStore.hasMeaningfulCurrentRead ? healthStore.displayedState.title : "No Data Yet"
     }
 }
 
@@ -119,7 +137,7 @@ private struct AmbientActionButtons: View {
                         .frame(height: 42)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(healthStore.displayedState.color)
+                .tint(healthStore.ambientVisualState.color)
             } else if healthStore.isRefreshing {
                 Text("Refreshing Apple Health...")
                     .font(.footnote.weight(.medium))

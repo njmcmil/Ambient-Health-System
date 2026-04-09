@@ -42,7 +42,11 @@ struct AmbientSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text("Each slider below changes how easily a specific mood shows up. Move it up if you want that mood to appear more easily. Move it down if the app is calling that mood too often.")
+                Text("Ambient Health turns recent Apple Health patterns into a wellness interpretation of your day. It is not a diagnosis or medical alert.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Text("Each slider below changes how easily a specific health state shows up. Move it up if you want that state to appear more easily. Move it down if the app is calling that state too often.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -116,7 +120,7 @@ struct AmbientSettingsView: View {
 
                 DisclosureGroup(isExpanded: $showsStatePreviewSection) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Preview a mood state on the phone and ambient object, and read the kind of health pattern that would usually create it. This does not change your live health data or saved state history.")
+                        Text("Preview a health state on the phone and ambient object, and read the kind of pattern that would usually create it. This does not change your live Health data or saved state history.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
@@ -201,6 +205,10 @@ struct AmbientSettingsView: View {
                             .foregroundStyle(.secondary)
 
                         Text(healthStore.authorizationState.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Text("Sleep, sleep quality, breathing overnight, oxygen, and sleeping wrist temperature are assigned to the day you wake up. The app uses them as wellness context, not as a diagnosis.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
@@ -376,13 +384,71 @@ struct AmbientSettingsView: View {
 #if DEBUG
                 DisclosureGroup(isExpanded: $showsDebugSnapshotSection) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Developer-only snapshot details for explaining why the current state was chosen.")
+                        Text("Developer-only snapshot details showing the raw Apple Health signals behind the current wellness interpretation.")
                             .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Text("Scroll for raw metrics, sleep-stage detail, and classifier reasoning.")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
 
                         Text("State under analysis: \(healthStore.currentState.title)")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
+
+                        if let snapshot = healthStore.latestSnapshot {
+                            Text("Latest Apple Health snapshot")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                                ForEach(debugSnapshotMetrics(snapshot), id: \.label) { metric in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(metric.label)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+
+                                        Text(metric.value)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(10)
+                                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                            if let sleepStages = snapshot.sleepStages, sleepStages.totalSleepHours > 0 {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Sleep stage detail")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.primary)
+
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                                        ForEach(debugSleepStageMetrics(sleepStages), id: \.label) { metric in
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(metric.label)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+
+                                                Text(metric.value)
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.primary)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(10)
+                                            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                        }
+                                    }
+                                }
+                                .padding(12)
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                        }
 
                         if let report = healthStore.latestClassificationDebug {
                             Text("Generated: \(timeOnly(report.generatedAt))")
@@ -419,7 +485,7 @@ struct AmbientSettingsView: View {
                             .padding(12)
                             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         } else {
-                            Text("No classifier debug report yet. Refresh Health to generate one.")
+                            Text(debugReportFallbackMessage)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -510,7 +576,109 @@ struct AmbientSettingsView: View {
     }
 
     private var healthKitSectionSummary: String {
-        "\(healthStore.authorizationState.title). Expand to inspect available signals and connection details."
+        "\(healthStore.authorizationState.title). Expand to inspect which signals have recent data today and which overnight signals are still waiting on the next sleep session."
+    }
+
+    private var debugReportFallbackMessage: String {
+        if healthStore.latestSnapshot == nil {
+            return "No live Health snapshot yet. Connect Apple Health and refresh to load one."
+        }
+
+        if !healthStore.hasMeaningfulCurrentRead {
+            return "Today's live read does not have enough meaningful data yet to build a classifier report. This often happens early in a new day before new sleep or cardio signals land."
+        }
+
+        return "The latest snapshot is loaded, but the classifier report is still waiting on the current analysis pass."
+    }
+
+    private func debugSnapshotMetrics(_ snapshot: AmbientHealthStore.Snapshot) -> [DebugMetric] {
+        let sleepValue: String = {
+            if let sleepStages = snapshot.sleepStages, sleepStages.totalSleepHours > 0 {
+                return String(format: "%.1f h", sleepStages.totalSleepHours)
+            }
+            if let sleepHours = snapshot.sleepHours, sleepHours > 0 {
+                return String(format: "%.1f h", sleepHours)
+            }
+            return "No recent data"
+        }()
+
+        let sleepQualityValue: String = {
+            guard let sleepStages = snapshot.sleepStages, sleepStages.totalSleepHours > 0 else {
+                return "No recent data"
+            }
+            return "Deep \(Int(sleepStages.deepPercent.rounded()))% • REM \(Int(sleepStages.remPercent.rounded()))% • Awake \(Int(sleepStages.awakePercent.rounded()))%"
+        }()
+
+        return [
+            .init(label: "Sleep Duration", value: sleepValue),
+            .init(label: "Sleep Quality", value: sleepQualityValue),
+            .init(label: "Breathing Overnight", value: formatDecimal(snapshot.respiratoryRate, suffix: "/min")),
+            .init(label: "Oxygen Saturation", value: formatPercent(snapshot.oxygenSaturationPercent)),
+            .init(label: "Wrist Temperature", value: formatTemperature(snapshot.wristTemperatureCelsius)),
+            .init(label: "Current Heart Rate", value: formatInteger(snapshot.currentHeartRate, suffix: " bpm")),
+            .init(label: "Resting Heart Rate", value: formatInteger(snapshot.restingHeartRate, suffix: " bpm")),
+            .init(label: "Heart Rate Delta", value: formatSignedInteger(snapshot.heartRateDelta, suffix: " bpm")),
+            .init(label: "HRV", value: formatInteger(snapshot.heartRateVariability, suffix: " ms")),
+            .init(label: "Steps", value: formatCount(snapshot.stepCountToday)),
+            .init(label: "Exercise", value: formatInteger(snapshot.exerciseMinutesToday, suffix: " min")),
+            .init(label: "Active Energy", value: formatInteger(snapshot.activeEnergyToday, suffix: " kcal")),
+            .init(label: "Walking/Running", value: formatDecimal(snapshot.walkingRunningDistanceToday, suffix: " km")),
+            .init(label: "Flights Climbed", value: formatInteger(snapshot.flightsClimbedToday, suffix: "")),
+            .init(label: "Mindful Minutes", value: formatInteger(snapshot.mindfulMinutesToday, suffix: " min")),
+            .init(label: "Recent Workout", value: formatOptionalWorkout(snapshot.recentWorkoutMinutes, minutesSinceEnd: snapshot.minutesSinceRecentWorkout)),
+            .init(label: "Snapshot Time", value: formattedTimestamp(snapshot.sampledAt))
+        ]
+    }
+
+    private func debugSleepStageMetrics(_ sleepStages: AmbientHealthStore.SleepStageBreakdown) -> [DebugMetric] {
+        [
+            .init(label: "In Bed", value: String(format: "%.1f h", sleepStages.inBedHours)),
+            .init(label: "Asleep", value: String(format: "%.1f h", sleepStages.totalSleepHours)),
+            .init(label: "Core Sleep", value: String(format: "%.1f h • %d%%", sleepStages.coreHours, Int(max(0, 100 - sleepStages.deepPercent - sleepStages.remPercent - sleepStages.awakePercent).rounded()))),
+            .init(label: "Deep Sleep", value: String(format: "%.1f h • %d%%", sleepStages.deepHours, Int(sleepStages.deepPercent.rounded()))),
+            .init(label: "REM Sleep", value: String(format: "%.1f h • %d%%", sleepStages.remHours, Int(sleepStages.remPercent.rounded()))),
+            .init(label: "Awake", value: String(format: "%.1f h • %d%%", sleepStages.awakeHours, Int(sleepStages.awakePercent.rounded()))),
+            .init(label: "Sleep Efficiency", value: "\(Int(sleepStages.efficiencyPercent.rounded()))%"),
+            .init(label: "Unspecified Sleep", value: String(format: "%.1f h", sleepStages.unspecifiedSleepHours))
+        ]
+    }
+
+    private func formatInteger(_ value: Double?, suffix: String) -> String {
+        guard let value else { return "No recent data" }
+        return "\(Int(value.rounded()))\(suffix)"
+    }
+
+    private func formatSignedInteger(_ value: Double?, suffix: String) -> String {
+        guard let value else { return "No recent data" }
+        return String(format: "%+.0f%@", value, suffix)
+    }
+
+    private func formatDecimal(_ value: Double?, suffix: String) -> String {
+        guard let value else { return "No recent data" }
+        return String(format: "%.1f%@", value, suffix)
+    }
+
+    private func formatPercent(_ value: Double?) -> String {
+        guard let value else { return "No recent data" }
+        return "\(Int(value.rounded()))%"
+    }
+
+    private func formatTemperature(_ value: Double?) -> String {
+        guard let value else { return "No recent data" }
+        return String(format: "%+.1f C", value)
+    }
+
+    private func formatCount(_ value: Double?) -> String {
+        guard let value else { return "No recent data" }
+        return Int(value.rounded()).formatted()
+    }
+
+    private func formatOptionalWorkout(_ minutes: Double?, minutesSinceEnd: Double?) -> String {
+        guard let minutes else { return "No recent data" }
+        if let minutesSinceEnd {
+            return "\(Int(minutes.rounded())) min • \(Int(minutesSinceEnd.rounded())) min ago"
+        }
+        return "\(Int(minutes.rounded())) min"
     }
 
     private var accessibilitySummaryLine: String {
@@ -577,6 +745,11 @@ struct AmbientSettingsView: View {
             return .gray
         }
     }
+}
+
+private struct DebugMetric {
+    let label: String
+    let value: String
 }
 
 private struct AmbientSensitivityControlCard: View {

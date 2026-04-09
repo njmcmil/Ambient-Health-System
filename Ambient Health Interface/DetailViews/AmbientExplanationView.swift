@@ -14,21 +14,41 @@ struct AmbientExplanationView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     AmbientSectionHeader(
-                        title: healthStore.displayedState.title,
-                        symbol: symbolForState(healthStore.displayedState),
-                        tint: healthStore.displayedState.color,
+                        title: explanationHeaderTitle,
+                        symbol: explanationHeaderSymbol,
+                        tint: explanationHeaderTint,
                         animateSymbol: !reduceMotionEnabled
                     )
 
-                    let chips = healthStore.previewState.map(previewSignalChips(for:)) ?? explanationSignalChips(snapshot: healthStore.latestSnapshot)
-                    if !calmerModeEnabled, !chips.isEmpty {
-                        AmbientExplanationSignalRow(
-                            chips: chips,
-                            tint: healthStore.displayedState.color
-                        )
+                    let chips = healthStore.previewState.map(previewSignalChips(for:))
+                        ?? (healthStore.hasMeaningfulCurrentRead
+                            ? explanationSignalChips(snapshot: healthStore.latestSnapshot, state: healthStore.displayedState)
+                            : [])
+                    if !calmerModeEnabled {
+                        if !chips.isEmpty {
+                            AmbientExplanationSignalRow(
+                                chips: chips,
+                                tint: healthStore.displayedState.color
+                            )
+                        } else {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Most Relevant Signals")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                Text("No recent data yet for today's read.")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            .padding(.top, 4)
+                        }
 
                         if healthStore.previewState == nil {
-                            Text("Based on your current read.")
+                            Text(currentReadFootnote)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary.opacity(0.78))
                         }
@@ -103,20 +123,22 @@ struct AmbientExplanationView: View {
         if let previewState = healthStore.previewState {
             return Array(repeating: previewState, count: max(healthStore.history.count, 6))
         }
-        if let dailyTrail = healthStore.trendReport?.stateTrail, !dailyTrail.isEmpty {
+        if !healthStore.liveCalendarStateTrail.isEmpty {
             let calendar = Calendar.current
-            var states = dailyTrail.map(\.state)
+            let today = calendar.startOfDay(for: Date())
+            let currentDayStart = healthStore.hasMeaningfulCurrentRead ? today : (calendar.date(byAdding: .day, value: -1, to: today) ?? today)
 
-            if let lastDate = dailyTrail.last?.date, calendar.isDateInToday(lastDate) {
-                states[states.count - 1] = healthStore.displayedState
-            } else {
-                states.append(healthStore.displayedState)
-                if states.count > 7 {
-                    states.removeFirst(states.count - 7)
+            let states = (0..<7).compactMap { offset -> ColorHealthState? in
+                let day = calendar.date(byAdding: .day, value: -(6 - offset), to: currentDayStart) ?? currentDayStart
+                if healthStore.hasMeaningfulCurrentRead, calendar.isDateInToday(day) {
+                    return healthStore.displayedState
                 }
+                return healthStore.liveCalendarStateTrail.first(where: { calendar.isDate($0.date, inSameDayAs: day) })?.state
             }
 
-            return states
+            if !states.isEmpty {
+                return states
+            }
         }
         return healthStore.history
     }
@@ -128,9 +150,15 @@ struct AmbientExplanationView: View {
                 : genericExplanationBullets(for: previewState)
         }
 
+        if !healthStore.hasMeaningfulCurrentRead {
+            return [
+                "No recent Apple Health data has landed for today yet, so the app is waiting for today's first meaningful signals before interpreting a live state."
+            ]
+        }
+
         return calmerModeEnabled
-            ? calmerExplanationBullets(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
-            : explanationBullets(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
+            ? calmerExplanationBullets(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot, baseline: healthStore.baselineSummary)
+            : explanationBullets(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot, baseline: healthStore.baselineSummary)
     }
 
     private var patternInsightText: String {
@@ -140,9 +168,62 @@ struct AmbientExplanationView: View {
                 : patternInsight(for: previewState, snapshot: nil)
         }
 
+        if !healthStore.hasMeaningfulCurrentRead {
+            return "No recent data yet for today's live read. Weekly context is still visible, but today's state will settle once new signals arrive."
+        }
+
         return calmerModeEnabled
-            ? calmerPatternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
-            : patternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot)
+            ? calmerPatternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot, baseline: healthStore.baselineSummary)
+            : patternInsight(for: healthStore.displayedState, snapshot: healthStore.latestSnapshot, baseline: healthStore.baselineSummary)
+    }
+
+    private var currentReadFootnote: String {
+        guard let snapshot = healthStore.latestSnapshot else {
+            return "No recent data yet for today's read."
+        }
+
+        let missingCoreSignals = [
+            snapshot.sleepHours == nil && snapshot.sleepStages == nil,
+            snapshot.heartRateVariability == nil,
+            snapshot.restingHeartRate == nil,
+            snapshot.respiratoryRate == nil
+        ]
+        .filter { $0 }
+        .count
+
+        if missingCoreSignals >= 3 {
+            return "No recent data yet for most of today's read, so this state is based on limited signals so far."
+        }
+
+        if missingCoreSignals >= 1 {
+            return "Some recent data for today has not arrived yet, so this read is based on limited signals so far."
+        }
+
+        return "Based on your current read."
+    }
+
+    private var explanationHeaderTitle: String {
+        if healthStore.previewState != nil || healthStore.hasMeaningfulCurrentRead {
+            return healthStore.displayedState.title
+        }
+
+        return "No Data Yet"
+    }
+
+    private var explanationHeaderSymbol: String {
+        if healthStore.previewState != nil || healthStore.hasMeaningfulCurrentRead {
+            return symbolForState(healthStore.displayedState)
+        }
+
+        return "tray"
+    }
+
+    private var explanationHeaderTint: Color {
+        if healthStore.previewState != nil || healthStore.hasMeaningfulCurrentRead {
+            return healthStore.displayedState.color
+        }
+
+        return Color(red: 0.66, green: 0.70, blue: 0.76)
     }
 
 }

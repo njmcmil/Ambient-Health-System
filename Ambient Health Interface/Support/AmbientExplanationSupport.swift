@@ -14,12 +14,16 @@ private struct ExplanationDriver: Hashable {
 }
 
 /// State interpretation copy and ranking helpers used by explanation-style screens.
-func explanationBullets(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> [String] {
+func explanationBullets(
+    for state: ColorHealthState,
+    snapshot: AmbientHealthStore.Snapshot?,
+    baseline: AmbientHealthStore.BaselineSummary? = nil
+) -> [String] {
     guard let snapshot else {
         return genericExplanationBullets(for: state)
     }
 
-    let drivers = explanationDrivers(for: state, snapshot: snapshot)
+    let drivers = explanationDrivers(for: state, snapshot: snapshot, baseline: baseline)
     if drivers.isEmpty {
         return genericExplanationBullets(for: state)
     }
@@ -32,50 +36,54 @@ func explanationBullets(for state: ColorHealthState, snapshot: AmbientHealthStor
         includedSignals.insert(primaryDriver.signal)
     }
 
-    if !includedSignals.contains(.hrv), let hrvLine = hrvExplanationLine(from: snapshot) {
+    if !includedSignals.contains(.hrv), let hrvLine = hrvExplanationLine(from: snapshot, baseline: baseline) {
         bullets.append(hrvLine)
         includedSignals.insert(.hrv)
     }
 
-    if !includedSignals.contains(.breathing), let breathingLine = breathingExplanationLine(from: snapshot) {
+    if !includedSignals.contains(.breathing), let breathingLine = breathingExplanationLine(from: snapshot, baseline: baseline) {
         bullets.append(breathingLine)
         includedSignals.insert(.breathing)
     }
 
-    if !includedSignals.contains(.restingHeartRate), let restingLine = restingHeartRateExplanationLine(from: snapshot) {
+    if !includedSignals.contains(.restingHeartRate), let restingLine = restingHeartRateExplanationLine(from: snapshot, baseline: baseline) {
         bullets.append(restingLine)
         includedSignals.insert(.restingHeartRate)
     }
 
     if !includedSignals.contains(.sleep), let sleepStages = snapshot.sleepStages {
-        bullets.append(sleepStageInsightLine(from: sleepStages))
+        bullets.append(sleepStageInsightLine(from: sleepStages, baseline: baseline))
         includedSignals.insert(.sleep)
     } else if !includedSignals.contains(.sleep), let sleepHours = snapshot.sleepHours {
-        bullets.append("Sleep was about \(String(format: "%.1f", sleepHours)) hours.")
+        bullets.append(sleepHoursExplanationLine(sleepHours, baseline: baseline))
         includedSignals.insert(.sleep)
     }
 
     return Array((NSOrderedSet(array: bullets).array as? [String] ?? bullets).prefix(4))
 }
 
-func calmerExplanationBullets(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> [String] {
+func calmerExplanationBullets(
+    for state: ColorHealthState,
+    snapshot: AmbientHealthStore.Snapshot?,
+    baseline: AmbientHealthStore.BaselineSummary? = nil
+) -> [String] {
     guard let snapshot else {
         return calmerGenericExplanationBullets(for: state)
     }
 
     var bullets = calmerGenericExplanationBullets(for: state)
 
-    if let line = sleepCalmerLine(from: snapshot) {
+    if let line = sleepCalmerLine(from: snapshot, baseline: baseline) {
         bullets.append(line)
     }
 
     switch state {
     case .blue, .green:
-        if let line = hrvCalmerLine(from: snapshot, positive: true) {
+        if let line = hrvCalmerLine(from: snapshot, baseline: baseline, positive: true) {
             bullets.append(line)
         }
     case .purple, .red, .orange:
-        if let line = hrvCalmerLine(from: snapshot, positive: false) {
+        if let line = hrvCalmerLine(from: snapshot, baseline: baseline, positive: false) {
             bullets.append(line)
         }
     case .yellow, .gray:
@@ -84,11 +92,11 @@ func calmerExplanationBullets(for state: ColorHealthState, snapshot: AmbientHeal
 
     switch state {
     case .blue, .green, .gray:
-        if let line = restingCalmerLine(from: snapshot, calm: true) {
+        if let line = restingCalmerLine(from: snapshot, baseline: baseline, calm: true) {
             bullets.append(line)
         }
     case .purple, .red, .orange:
-        if let line = restingCalmerLine(from: snapshot, calm: false) {
+        if let line = restingCalmerLine(from: snapshot, baseline: baseline, calm: false) {
             bullets.append(line)
         }
     case .yellow:
@@ -107,17 +115,21 @@ func calmerExplanationBullets(for state: ColorHealthState, snapshot: AmbientHeal
     return Array(bullets.prefix(3))
 }
 
-func calmerPatternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> String {
+func calmerPatternInsight(
+    for state: ColorHealthState,
+    snapshot: AmbientHealthStore.Snapshot?,
+    baseline: AmbientHealthStore.BaselineSummary? = nil
+) -> String {
     if snapshot != nil {
         switch state {
         case .blue:
-            return "Your recent pattern looks more supported than usual, with sleep and recovery leaning gently in your favor."
+            return "Your recent pattern looks more supported than your usual baseline, with sleep and recovery leaning gently in your favor."
         case .green:
             return "Your recent pattern looks fairly even, with no single signal pulling very hard in one direction."
         case .yellow:
             return "Your recent pattern looks quieter than usual, especially around energy and movement."
         case .purple:
-            return "Your recent pattern looks more activated than usual, with a few strain-related signals lining up together."
+            return "Your recent pattern looks more activated than your usual baseline, with a few strain-related signals lining up together."
         case .gray:
             return "Your recent pattern looks close to your own baseline, without a strong push toward another state."
         case .red:
@@ -170,34 +182,45 @@ func calmerGenericExplanationBullets(for state: ColorHealthState) -> [String] {
     }
 }
 
-private func sleepCalmerLine(from snapshot: AmbientHealthStore.Snapshot) -> String? {
+private func sleepCalmerLine(
+    from snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String? {
     guard let sleepHours = snapshot.sleepHours else { return nil }
-    if sleepHours >= 8.5 {
+    if isHigherThanUsual(sleepHours, baseline: baseline?.sleepHours, fallbackThreshold: 8.5, minimumSpread: 0.6) {
         return "Sleep has been on the fuller side lately."
     }
-    if sleepHours <= 6 {
+    if isLowerThanUsual(sleepHours, baseline: baseline?.sleepHours, fallbackThreshold: 6, minimumSpread: 0.6) {
         return "Sleep has been on the lighter side lately."
     }
     return "Sleep looks fairly mid-range right now."
 }
 
-private func hrvCalmerLine(from snapshot: AmbientHealthStore.Snapshot, positive: Bool) -> String? {
+private func hrvCalmerLine(
+    from snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?,
+    positive: Bool
+) -> String? {
     guard let hrv = snapshot.heartRateVariability else { return nil }
-    if positive, hrv >= 45 {
+    if positive, isHigherThanUsual(hrv, baseline: baseline?.heartRateVariability, fallbackThreshold: 45, minimumSpread: 4) {
         return "Recovery signals look a little more supportive than usual."
     }
-    if !positive, hrv <= 30 {
+    if !positive, isLowerThanUsual(hrv, baseline: baseline?.heartRateVariability, fallbackThreshold: 30, minimumSpread: 4) {
         return "Recovery signals look a little softer than usual."
     }
     return nil
 }
 
-private func restingCalmerLine(from snapshot: AmbientHealthStore.Snapshot, calm: Bool) -> String? {
+private func restingCalmerLine(
+    from snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?,
+    calm: Bool
+) -> String? {
     guard let resting = snapshot.restingHeartRate else { return nil }
-    if calm, resting <= 64 {
+    if calm, isLowerThanUsual(resting, baseline: baseline?.restingHeartRate, fallbackThreshold: 64, minimumSpread: 2) {
         return "Your resting rhythm looks fairly calm right now."
     }
-    if !calm, resting >= 76 {
+    if !calm, isHigherThanUsual(resting, baseline: baseline?.restingHeartRate, fallbackThreshold: 76, minimumSpread: 2) {
         return "Your resting rhythm looks a little more activated right now."
     }
     return nil
@@ -214,72 +237,95 @@ private func movementCalmerLine(from snapshot: AmbientHealthStore.Snapshot, acti
     return nil
 }
 
-private func sleepStageInsightLine(from sleepStages: AmbientHealthStore.SleepStageBreakdown) -> String {
+private func sleepStageInsightLine(
+    from sleepStages: AmbientHealthStore.SleepStageBreakdown,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String {
     let awake = Int(sleepStages.awakePercent.rounded())
 
-    if awake >= 16 {
+    if isHigherThanUsual(sleepStages.awakePercent, baseline: baseline?.awakePercent, fallbackThreshold: 16, minimumSpread: 3) {
         return "Sleep looked more broken up than usual, so recovery may have felt less complete."
     }
 
-    if sleepStages.deepPercent <= 12 && sleepStages.remPercent <= 18 {
+    if isLowerThanUsual(sleepStages.deepPercent, baseline: baseline?.deepSleepPercent, fallbackThreshold: 12, minimumSpread: 3)
+        && isLowerThanUsual(sleepStages.remPercent, baseline: baseline?.remSleepPercent, fallbackThreshold: 18, minimumSpread: 3) {
         return "Sleep looked lighter than usual, which can leave energy and mood feeling less restored."
     }
 
-    if sleepStages.deepPercent >= 18 && sleepStages.remPercent >= 20 && awake <= 10 {
+    if isHigherThanUsual(sleepStages.deepPercent, baseline: baseline?.deepSleepPercent, fallbackThreshold: 18, minimumSpread: 3)
+        && isHigherThanUsual(sleepStages.remPercent, baseline: baseline?.remSleepPercent, fallbackThreshold: 20, minimumSpread: 3)
+        && !isHigherThanUsual(sleepStages.awakePercent, baseline: baseline?.awakePercent, fallbackThreshold: 10, minimumSpread: 2) {
         return "Sleep looked fairly restorative, which usually supports steadier energy and recovery."
     }
 
     return "Sleep quality looked mixed, so some recovery likely happened without feeling fully restorative."
 }
 
-private func hrvExplanationLine(from snapshot: AmbientHealthStore.Snapshot) -> String? {
+private func hrvExplanationLine(
+    from snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String? {
     guard let hrv = snapshot.heartRateVariability else { return nil }
-    if hrv <= 30 {
+    if isLowerThanUsual(hrv, baseline: baseline?.heartRateVariability, fallbackThreshold: 30, minimumSpread: 4) {
         return "HRV looks lower than your stronger recovery range, which can happen when your body is under more strain."
     }
-    if hrv >= 48 {
+    if isHigherThanUsual(hrv, baseline: baseline?.heartRateVariability, fallbackThreshold: 48, minimumSpread: 4) {
         return "HRV looks stronger than usual, which usually lines up with steadier recovery."
     }
     return "HRV looks fairly mid-range, so recovery does not look strongly pulled either way."
 }
 
-private func breathingExplanationLine(from snapshot: AmbientHealthStore.Snapshot) -> String? {
+private func breathingExplanationLine(
+    from snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String? {
     guard let breathing = snapshot.respiratoryRate else { return nil }
-    if breathing >= 17 {
-        return "Breathing rate looks a little higher than your quieter range, which can happen when your system is more activated."
+    if isHigherThanUsual(breathing, baseline: baseline?.respiratoryRate, fallbackThreshold: 17, minimumSpread: 0.8) {
+        return "Your most recent sleep breathing pattern looks a little higher than your quieter range, which can line up with a more activated or strained read."
     }
-    if breathing <= 13 {
-        return "Breathing rate looks fairly settled, which usually fits a calmer pattern."
+    if isLowerThanUsual(breathing, baseline: baseline?.respiratoryRate, fallbackThreshold: 13, minimumSpread: 0.8) {
+        return "Your most recent sleep breathing pattern looks fairly settled, which usually fits a calmer overall read."
     }
-    return "Breathing rate looks fairly mid-range, without a strong push toward calm or strain."
+    return "Your most recent sleep breathing pattern looks fairly mid-range, without a strong pull toward calm or strain."
 }
 
-private func restingHeartRateExplanationLine(from snapshot: AmbientHealthStore.Snapshot) -> String? {
+private func restingHeartRateExplanationLine(
+    from snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String? {
     guard let resting = snapshot.restingHeartRate else { return nil }
-    if resting >= 78 {
+    if isHigherThanUsual(resting, baseline: baseline?.restingHeartRate, fallbackThreshold: 78, minimumSpread: 2) {
         return "Resting heart rate is running higher than your calmer range, which can make the body read as more activated or strained."
     }
-    if resting <= 62 {
+    if isLowerThanUsual(resting, baseline: baseline?.restingHeartRate, fallbackThreshold: 62, minimumSpread: 2) {
         return "Resting heart rate is sitting in a calmer range, which usually supports a steadier overall read."
     }
     return "Resting heart rate looks fairly mid-range, without a strong pull toward calm or activation."
 }
 
-func patternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot?) -> String {
+func patternInsight(
+    for state: ColorHealthState,
+    snapshot: AmbientHealthStore.Snapshot?,
+    baseline: AmbientHealthStore.BaselineSummary? = nil
+) -> String {
     guard let snapshot else { return genericPatternInsight(for: state) }
-    return livePatternInsight(for: state, snapshot: snapshot)
+    return livePatternInsight(for: state, snapshot: snapshot, baseline: baseline)
 }
 
-private func explanationDrivers(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot) -> [ExplanationDriver] {
+private func explanationDrivers(
+    for state: ColorHealthState,
+    snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> [ExplanationDriver] {
     var drivers: [ExplanationDriver] = []
 
     if let sleep = snapshot.sleepHours {
-        if sleep >= 9.2 {
+        if isHigherThanUsual(sleep, baseline: baseline?.sleepHours, fallbackThreshold: 9.2, minimumSpread: 0.6) {
             drivers.append(.init(
                 signal: .sleep,
                 text: "You slept longer than usual, which can sometimes line up with slower momentum or your body still trying to recover."
             ))
-        } else if sleep <= 6 {
+        } else if isLowerThanUsual(sleep, baseline: baseline?.sleepHours, fallbackThreshold: 6, minimumSpread: 0.6) {
             drivers.append(.init(
                 signal: .sleep,
                 text: "You slept less than usual, which can make recovery feel less complete."
@@ -288,12 +334,12 @@ private func explanationDrivers(for state: ColorHealthState, snapshot: AmbientHe
     }
 
     if let hrv = snapshot.heartRateVariability {
-        if hrv <= 30 {
+        if isLowerThanUsual(hrv, baseline: baseline?.heartRateVariability, fallbackThreshold: 30, minimumSpread: 4) {
             drivers.append(.init(
                 signal: .hrv,
                 text: "Your recovery signals look lower than usual right now, which can happen when your body is under more strain or has not bounced back yet."
             ))
-        } else if hrv >= 48 {
+        } else if isHigherThanUsual(hrv, baseline: baseline?.heartRateVariability, fallbackThreshold: 48, minimumSpread: 4) {
             drivers.append(.init(
                 signal: .hrv,
                 text: "Your recovery signals look stronger than usual right now, which usually lines up with a steadier state."
@@ -302,26 +348,26 @@ private func explanationDrivers(for state: ColorHealthState, snapshot: AmbientHe
     }
 
     if let breathing = snapshot.respiratoryRate {
-        if breathing >= 17 {
+        if isHigherThanUsual(breathing, baseline: baseline?.respiratoryRate, fallbackThreshold: 17, minimumSpread: 0.8) {
             drivers.append(.init(
                 signal: .breathing,
-                text: "Your breathing rate is running a little higher than your quieter range right now, which can happen when your system is more activated or strained."
+                text: "Your most recent sleep breathing pattern is running a little higher than your quieter range, which can happen when your system is more activated or strained."
             ))
-        } else if breathing <= 13 {
+        } else if isLowerThanUsual(breathing, baseline: baseline?.respiratoryRate, fallbackThreshold: 13, minimumSpread: 0.8) {
             drivers.append(.init(
                 signal: .breathing,
-                text: "Your breathing rate looks fairly settled right now, which usually fits a calmer overall pattern."
+                text: "Your most recent sleep breathing pattern looks fairly settled, which usually fits a calmer overall pattern."
             ))
         }
     }
 
     if let resting = snapshot.restingHeartRate {
-        if resting >= 78 {
+        if isHigherThanUsual(resting, baseline: baseline?.restingHeartRate, fallbackThreshold: 78, minimumSpread: 2) {
             drivers.append(.init(
                 signal: .restingHeartRate,
                 text: "Your resting heart rate is running higher than your usual calm range right now, which can make your system look more activated or on edge."
             ))
-        } else if resting <= 62 {
+        } else if isLowerThanUsual(resting, baseline: baseline?.restingHeartRate, fallbackThreshold: 62, minimumSpread: 2) {
             drivers.append(.init(
                 signal: .restingHeartRate,
                 text: "Your resting heart rate is sitting in a calmer range right now, which usually supports a steadier or more recovered read."
@@ -374,50 +420,120 @@ private func score(_ driver: String, preferred: [String]) -> Int {
     }
 }
 
-private func livePatternInsight(for state: ColorHealthState, snapshot: AmbientHealthStore.Snapshot) -> String {
+private func livePatternInsight(
+    for state: ColorHealthState,
+    snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String {
     switch state {
     case .blue:
-        return hasSupportiveRecoveryPattern(snapshot)
-            ? "Pattern-wise, this usually holds if sleep and recovery stay steady through the next day."
-            : "Pattern-wise, this can stay restored, but it is usually the first state to fade if recovery softens."
+        return hasSupportiveRecoveryPattern(snapshot, baseline: baseline)
+            ? "Pattern-wise, this usually lasts when sleep and recovery stay steady into the next day."
+            : "Pattern-wise, this can stay restored, but it often fades first if recovery softens."
     case .green:
-        return hasActivatedPattern(snapshot)
-            ? "Pattern-wise, this reads stable, but small rises in strain can push it toward stressed quickly."
-            : "Pattern-wise, this is your balance state, where no single signal is clearly dominating."
+        return hasActivatedPattern(snapshot, baseline: baseline)
+            ? "Pattern-wise, this looks steady, but even small rises in strain can push it toward stressed fairly quickly."
+            : "Pattern-wise, this is your more balanced state, where no one signal is pulling very hard."
     case .yellow:
-        return hasRecoveryDrag(snapshot)
-            ? "Pattern-wise, this often means low momentum plus mild recovery drag rather than strong stress."
-            : "Pattern-wise, this is mostly a movement-momentum dip, not a high-strain state."
+        return hasRecoveryDrag(snapshot, baseline: baseline)
+            ? "Pattern-wise, this often means lower momentum plus slightly weaker recovery, rather than strong stress."
+            : "Pattern-wise, this is usually more of a low-energy dip than a high-strain state."
     case .purple:
-        return "Pattern-wise, this reflects an activation cluster and usually eases only when multiple strain signals settle together."
+        return "Pattern-wise, this usually means a few stress-related signals are running higher than usual at the same time."
     case .gray:
-        return "Pattern-wise, this is your baseline zone where readings can shift either way depending on the next few signals."
+        return "Pattern-wise, this is your middle zone, where the next few signals can easily shift things either way."
     case .red:
-        return "Pattern-wise, this is a stacked high-strain read and usually needs more than one signal to cool before it drops."
+        return "Pattern-wise, this is a stronger strain state, and it usually takes more than one signal settling before it drops."
     case .orange:
-        return "Pattern-wise, this is a recovery-depletion cluster, where weaker recovery outweighs movement alone."
+        return "Pattern-wise, this usually means weaker recovery is weighing more heavily than low movement alone."
     }
 }
 
-private func hasSupportiveRecoveryPattern(_ snapshot: AmbientHealthStore.Snapshot) -> Bool {
-    let hrvSupportive = (snapshot.heartRateVariability ?? 0) >= 48
-    let restingCalm = (snapshot.restingHeartRate ?? .infinity) <= 64
-    let sleepSupportive = (snapshot.sleepStages.map { $0.deepPercent >= 18 && $0.remPercent >= 20 && $0.awakePercent <= 10 } ?? false)
-        || ((snapshot.sleepHours ?? 0) >= 7.4 && (snapshot.sleepHours ?? 0) <= 8.8)
+private func hasSupportiveRecoveryPattern(
+    _ snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> Bool {
+    let hrvSupportive = snapshot.heartRateVariability.map {
+        isHigherThanUsual($0, baseline: baseline?.heartRateVariability, fallbackThreshold: 48, minimumSpread: 4)
+    } ?? false
+    let restingCalm = snapshot.restingHeartRate.map {
+        isLowerThanUsual($0, baseline: baseline?.restingHeartRate, fallbackThreshold: 64, minimumSpread: 2)
+    } ?? false
+    let sleepSupportive = snapshot.sleepStages.map {
+        !isHigherThanUsual($0.awakePercent, baseline: baseline?.awakePercent, fallbackThreshold: 10, minimumSpread: 2)
+            && isHigherThanUsual($0.deepPercent, baseline: baseline?.deepSleepPercent, fallbackThreshold: 18, minimumSpread: 3)
+            && isHigherThanUsual($0.remPercent, baseline: baseline?.remSleepPercent, fallbackThreshold: 20, minimumSpread: 3)
+    } ?? false
+        || (snapshot.sleepHours.map {
+            !isLowerThanUsual($0, baseline: baseline?.sleepHours, fallbackThreshold: 7.4, minimumSpread: 0.6)
+        } ?? false)
     return hrvSupportive || restingCalm || sleepSupportive
 }
 
-private func hasActivatedPattern(_ snapshot: AmbientHealthStore.Snapshot) -> Bool {
-    (snapshot.restingHeartRate ?? 0) >= 76
-        || (snapshot.respiratoryRate ?? 0) >= 17
-        || (snapshot.heartRateVariability ?? .infinity) <= 32
+private func hasActivatedPattern(
+    _ snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> Bool {
+    (snapshot.restingHeartRate.map {
+        isHigherThanUsual($0, baseline: baseline?.restingHeartRate, fallbackThreshold: 76, minimumSpread: 2)
+    } ?? false)
+        || (snapshot.respiratoryRate.map {
+            isHigherThanUsual($0, baseline: baseline?.respiratoryRate, fallbackThreshold: 17, minimumSpread: 0.8)
+        } ?? false)
+        || (snapshot.heartRateVariability.map {
+            isLowerThanUsual($0, baseline: baseline?.heartRateVariability, fallbackThreshold: 32, minimumSpread: 4)
+        } ?? false)
 }
 
-private func hasRecoveryDrag(_ snapshot: AmbientHealthStore.Snapshot) -> Bool {
-    (snapshot.sleepHours ?? 7) <= 6.2
-        || (snapshot.sleepHours ?? 0) >= 9.2
-        || (snapshot.sleepStages?.awakePercent ?? 0) >= 15
-        || (snapshot.heartRateVariability ?? 100) <= 30
+private func hasRecoveryDrag(
+    _ snapshot: AmbientHealthStore.Snapshot,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> Bool {
+    (snapshot.sleepHours.map {
+        isLowerThanUsual($0, baseline: baseline?.sleepHours, fallbackThreshold: 6.2, minimumSpread: 0.6)
+            || isHigherThanUsual($0, baseline: baseline?.sleepHours, fallbackThreshold: 9.2, minimumSpread: 0.6)
+    } ?? false)
+        || (snapshot.sleepStages.map {
+            isHigherThanUsual($0.awakePercent, baseline: baseline?.awakePercent, fallbackThreshold: 15, minimumSpread: 3)
+        } ?? false)
+        || (snapshot.heartRateVariability.map {
+            isLowerThanUsual($0, baseline: baseline?.heartRateVariability, fallbackThreshold: 30, minimumSpread: 4)
+        } ?? false)
+}
+
+private func sleepHoursExplanationLine(
+    _ sleepHours: Double,
+    baseline: AmbientHealthStore.BaselineSummary?
+) -> String {
+    if isHigherThanUsual(sleepHours, baseline: baseline?.sleepHours, fallbackThreshold: 9.2, minimumSpread: 0.6) {
+        return "Sleep was longer than your usual range, which can sometimes line up with slower momentum or your body still trying to recover."
+    }
+    if isLowerThanUsual(sleepHours, baseline: baseline?.sleepHours, fallbackThreshold: 6, minimumSpread: 0.6) {
+        return "Sleep was shorter than your usual range, which can make recovery feel less complete."
+    }
+    return "Sleep was about \(String(format: "%.1f", sleepHours)) hours, which looks fairly mid-range for you."
+}
+
+private func isHigherThanUsual(
+    _ value: Double,
+    baseline: AmbientHealthStore.MetricBaseline?,
+    fallbackThreshold: Double,
+    minimumSpread: Double
+) -> Bool {
+    guard let baseline else { return value >= fallbackThreshold }
+    let spread = max(baseline.standardDeviation, minimumSpread, abs(baseline.mean) * 0.08)
+    return value >= (baseline.mean + spread)
+}
+
+private func isLowerThanUsual(
+    _ value: Double,
+    baseline: AmbientHealthStore.MetricBaseline?,
+    fallbackThreshold: Double,
+    minimumSpread: Double
+) -> Bool {
+    guard let baseline else { return value <= fallbackThreshold }
+    let spread = max(baseline.standardDeviation, minimumSpread, abs(baseline.mean) * 0.08)
+    return value <= (baseline.mean - spread)
 }
 
 func genericExplanationBullets(for state: ColorHealthState) -> [String] {
@@ -465,15 +581,15 @@ private func genericPatternInsight(for state: ColorHealthState) -> String {
     case .blue:
         return "Restored usually appears when recovery stays consistently supportive, not just from one good signal."
     case .green:
-        return "Grounded usually appears when the signal mix looks balanced and stable over time."
+        return "Grounded usually appears when your signals look balanced and steady over time."
     case .yellow:
-        return "Low Energy usually appears when movement momentum is quiet without stronger stress or recovery strain taking over."
+        return "Low Energy usually appears when movement stays quieter than usual without stronger stress taking over."
     case .purple:
-        return "Stressed usually appears when activation signals cluster and workout context does not fully explain them."
+        return "Stressed usually appears when a few strain signals rise together and exercise does not fully explain them."
     case .gray:
-        return "Neutral usually appears when no state has enough combined evidence to clearly dominate."
+        return "Neutral usually appears when nothing is standing out strongly enough to pull you into another state."
     case .red:
-        return "Overloaded usually appears when several higher-strain markers stack at the same time."
+        return "Overloaded usually appears when several stronger strain signals show up at the same time."
     case .orange:
         return "Drained usually appears when weaker recovery is the main story, more than simple low movement."
     }

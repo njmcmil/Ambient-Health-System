@@ -22,7 +22,7 @@ struct AmbientHealthObjectView: View {
     var body: some View {
         ZStack {
             AmbientBackgroundView(
-                state: healthStore.displayedState,
+                state: healthStore.ambientVisualState,
                 reduceIntensity: calmerModeEnabled || reduceMotionEnabled
             )
 
@@ -72,6 +72,11 @@ struct AmbientHealthObjectView: View {
         .onAppear {
             applySensitivityProfile()
             piController.startMonitoring()
+            Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                await healthStore.refreshIfNeeded()
+                await piController.refreshConnectionStatus()
+            }
         }
         .onChange(of: stressSensitivity) {
             scheduleSensitivityApply()
@@ -122,6 +127,7 @@ struct AmbientHealthObjectView: View {
             applySensitivityProfile()
         }
     }
+
 }
 
 private struct AmbientLargerTextModifier: ViewModifier {

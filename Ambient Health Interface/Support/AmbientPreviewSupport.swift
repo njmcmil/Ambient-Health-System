@@ -172,13 +172,20 @@ struct ExplanationSignalChip: Identifiable {
     let value: String
 }
 
-func explanationSignalChips(snapshot: AmbientHealthStore.Snapshot?) -> [ExplanationSignalChip] {
+func explanationSignalChips(
+    snapshot: AmbientHealthStore.Snapshot?,
+    state: ColorHealthState? = nil
+) -> [ExplanationSignalChip] {
     guard let snapshot else { return [] }
 
     var chips: [ExplanationSignalChip] = []
 
     if let sleepHours = snapshot.sleepHours {
         chips.append(.init(symbol: "moon.stars.fill", title: "Sleep", value: String(format: "%.1f h", sleepHours)))
+    }
+
+    if let sleepStages = snapshot.sleepStages, sleepStages.totalSleepHours > 0 {
+        chips.append(.init(symbol: "bed.double.fill", title: "Sleep Quality", value: "Deep \(Int(sleepStages.deepPercent.rounded()))%"))
     }
 
     if let hrv = snapshot.heartRateVariability {
@@ -190,13 +197,49 @@ func explanationSignalChips(snapshot: AmbientHealthStore.Snapshot?) -> [Explanat
     }
 
     if let respiratory = snapshot.respiratoryRate {
-        chips.append(.init(symbol: "wind", title: "Breathing", value: String(format: "%.1f/min", respiratory)))
+        chips.append(.init(symbol: "wind", title: "Breathing Overnight", value: String(format: "%.1f/min", respiratory)))
     }
 
-    if let steps = snapshot.stepCountToday {
+    if let oxygen = snapshot.oxygenSaturationPercent {
+        chips.append(.init(symbol: "drop.fill", title: "Oxygen", value: "\(Int(oxygen.rounded()))%"))
+    }
+
+    if let wristTemperature = snapshot.wristTemperatureCelsius, abs(wristTemperature) > 0.0001 {
+        chips.append(.init(symbol: "thermometer.medium", title: "Wrist Temp", value: String(format: "%+.1f C", wristTemperature)))
+    }
+
+    if let steps = snapshot.stepCountToday, steps > 0 {
         let value = steps >= 1000 ? String(format: "%.1fk", steps / 1000) : Int(steps).formatted()
         chips.append(.init(symbol: "figure.walk.motion", title: "Movement", value: value))
     }
 
-    return Array(chips.prefix(4))
+    guard let state else {
+        return Array(chips.prefix(4))
+    }
+
+    let preferredTitles: [String]
+    switch state {
+    case .blue:
+        preferredTitles = ["Sleep", "Sleep Quality", "HRV", "Resting", "Breathing Overnight", "Oxygen", "Wrist Temp", "Movement"]
+    case .green:
+        preferredTitles = ["Movement", "HRV", "Sleep", "Sleep Quality", "Resting", "Breathing Overnight", "Oxygen", "Wrist Temp"]
+    case .yellow:
+        preferredTitles = ["Movement", "Sleep", "Sleep Quality", "Resting", "HRV", "Breathing Overnight", "Oxygen", "Wrist Temp"]
+    case .purple:
+        preferredTitles = ["HRV", "Resting", "Breathing Overnight", "Sleep", "Sleep Quality", "Oxygen", "Wrist Temp", "Movement"]
+    case .gray:
+        preferredTitles = ["Sleep", "Sleep Quality", "HRV", "Resting", "Movement", "Breathing Overnight", "Oxygen", "Wrist Temp"]
+    case .red:
+        preferredTitles = ["HRV", "Resting", "Breathing Overnight", "Sleep", "Sleep Quality", "Oxygen", "Wrist Temp", "Movement"]
+    case .orange:
+        preferredTitles = ["Sleep", "Sleep Quality", "HRV", "Resting", "Breathing Overnight", "Oxygen", "Wrist Temp", "Movement"]
+    }
+
+    let sorted = chips.sorted { lhs, rhs in
+        let lhsIndex = preferredTitles.firstIndex(of: lhs.title) ?? preferredTitles.count
+        let rhsIndex = preferredTitles.firstIndex(of: rhs.title) ?? preferredTitles.count
+        return lhsIndex < rhsIndex
+    }
+
+    return Array(sorted.prefix(5))
 }

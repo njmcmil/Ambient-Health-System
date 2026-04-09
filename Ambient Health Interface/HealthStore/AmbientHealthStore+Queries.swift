@@ -22,19 +22,22 @@ extension AmbientHealthStore {
         async let currentHeartRate = latestQuantityValue(
             for: .heartRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
-            maxAgeHours: 6
+            maxAgeHours: 6,
+            requireTodaySample: true
         )
 
         async let restingHeartRate = latestQuantityValue(
             for: .restingHeartRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
-            maxAgeHours: 36
+            maxAgeHours: 36,
+            requireTodaySample: true
         )
 
         async let heartRateVariability = latestQuantityValue(
             for: .heartRateVariabilitySDNN,
             unit: HKUnit.secondUnit(with: .milli),
-            maxAgeHours: 36
+            maxAgeHours: 36,
+            requireTodaySample: true
         )
 
         async let mindfulMinutes = categoryDurationToday(for: .mindfulSession)
@@ -69,22 +72,19 @@ extension AmbientHealthStore {
     }
     func enrichSnapshot(_ snapshot: Snapshot) async throws -> Snapshot {
         // MARK: - Parallel HealthKit Queries
-        async let respiratoryRate = latestQuantityValue(
+        async let respiratoryRate = overnightAverageQuantityForToday(
             for: .respiratoryRate,
-            unit: HKUnit.count().unitDivided(by: .minute()),
-            maxAgeHours: 36
+            unit: HKUnit.count().unitDivided(by: .minute())
         )
 
-        async let oxygenSaturation = latestQuantityValue(
+        async let oxygenSaturation = overnightAverageQuantityForToday(
             for: .oxygenSaturation,
-            unit: .percent(),
-            maxAgeHours: 36
+            unit: .percent()
         )
 
-        async let wristTemperature = latestQuantityValue(
+        async let wristTemperature = overnightAverageQuantityForToday(
             for: .appleSleepingWristTemperature,
             unit: .degreeCelsius(),
-            maxAgeHours: 48,
             treatZeroAsNil: false
         )
 
@@ -162,7 +162,8 @@ extension AmbientHealthStore {
 
     func loadTrendReport(
         days: Int,
-        snapshot: Snapshot
+        snapshot: Snapshot,
+        baseline: BaselineSummary?
     ) async throws -> TrendReport {
         async let steps = dailyCumulativeSeries(for: .stepCount, unit: .count(), days: days)
         async let exerciseMinutes = dailyCumulativeSeries(for: .appleExerciseTime, unit: .minute(), days: days)
@@ -176,20 +177,21 @@ extension AmbientHealthStore {
             unit: HKUnit.secondUnit(with: .milli),
             days: days
         )
-        async let respiratoryRate = dailyAverageSeries(
+        async let respiratoryRate = nightlyQuantitySeries(
             for: .respiratoryRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
             days: days
         )
-        async let oxygenSaturation = dailyAverageSeries(
+        async let oxygenSaturation = nightlyQuantitySeries(
             for: .oxygenSaturation,
             unit: .percent(),
             days: days
         )
-        async let wristTemperature = dailyAverageSeries(
+        async let wristTemperature = nightlyQuantitySeries(
             for: .appleSleepingWristTemperature,
             unit: .degreeCelsius(),
-            days: days
+            days: days,
+            treatZeroAsNil: false
         )
         let calendarDays = max(days, 21)
         async let calendarSteps = dailyCumulativeSeries(for: .stepCount, unit: .count(), days: calendarDays)
@@ -204,20 +206,21 @@ extension AmbientHealthStore {
             unit: HKUnit.secondUnit(with: .milli),
             days: calendarDays
         )
-        async let calendarRespiratoryRate = dailyAverageSeries(
+        async let calendarRespiratoryRate = nightlyQuantitySeries(
             for: .respiratoryRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
             days: calendarDays
         )
-        async let calendarOxygenSaturation = dailyAverageSeries(
+        async let calendarOxygenSaturation = nightlyQuantitySeries(
             for: .oxygenSaturation,
             unit: .percent(),
             days: calendarDays
         )
-        async let calendarWristTemperature = dailyAverageSeries(
+        async let calendarWristTemperature = nightlyQuantitySeries(
             for: .appleSleepingWristTemperature,
             unit: .degreeCelsius(),
-            days: calendarDays
+            days: calendarDays,
+            treatZeroAsNil: false
         )
         async let calendarSleepStages = dailySleepStageSeries(days: calendarDays)
         async let sleepStages = dailySleepStageSeries(days: days)
@@ -231,6 +234,18 @@ extension AmbientHealthStore {
         async let hourlyRespiratoryRate = hourlyAverageSeries(
             for: .respiratoryRate,
             unit: HKUnit.count().unitDivided(by: .minute())
+        )
+        async let calendarHourlySteps = hourlyCumulativeSeries(for: .stepCount, unit: .count(), days: calendarDays)
+        async let calendarHourlyExercise = hourlyCumulativeSeries(for: .appleExerciseTime, unit: .minute(), days: calendarDays)
+        async let calendarHourlyHeartRate = hourlyAverageSeries(
+            for: .heartRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: calendarDays
+        )
+        async let calendarHourlyRespiratoryRate = hourlyAverageSeries(
+            for: .respiratoryRate,
+            unit: HKUnit.count().unitDivided(by: .minute()),
+            days: calendarDays
         )
 
         let loadedSteps = try await steps
@@ -258,8 +273,15 @@ extension AmbientHealthStore {
         let loadedHourlyExercise = try await hourlyExercise
         let loadedHourlyHeartRate = try await hourlyHeartRate
         let loadedHourlyRespiratoryRate = try await hourlyRespiratoryRate
+        let loadedCalendarHourlySteps = try await calendarHourlySteps
+        let loadedCalendarHourlyExercise = try await calendarHourlyExercise
+        let loadedCalendarHourlyHeartRate = try await calendarHourlyHeartRate
+        let loadedCalendarHourlyRespiratoryRate = try await calendarHourlyRespiratoryRate
 
         let sleepHours = loadedSleepStages.map {
+            TrendPoint(date: $0.date, value: $0.totalSleepHours)
+        }
+        let calendarSleepHours = loadedCalendarSleepStages.map {
             TrendPoint(date: $0.date, value: $0.totalSleepHours)
         }
 
@@ -271,9 +293,10 @@ extension AmbientHealthStore {
             heartRateVariability: loadedHeartRateVariability,
             respiratoryRate: loadedRespiratoryRate,
             oxygenSaturationPercent: loadedOxygenSaturation,
-            wristTemperatureCelsius: loadedWristTemperature
+            wristTemperatureCelsius: loadedWristTemperature,
+            referenceBaseline: baseline
         )
-        let calendarStateTrail = deriveStateTrail(
+        let calendarStateTrail = deriveCalendarStateTrail(
             steps: loadedCalendarSteps,
             exerciseMinutes: loadedCalendarExerciseMinutes,
             sleepStages: loadedCalendarSleepStages,
@@ -281,14 +304,20 @@ extension AmbientHealthStore {
             heartRateVariability: loadedCalendarHeartRateVariability,
             respiratoryRate: loadedCalendarRespiratoryRate,
             oxygenSaturationPercent: loadedCalendarOxygenSaturation,
-            wristTemperatureCelsius: loadedCalendarWristTemperature
+            wristTemperatureCelsius: loadedCalendarWristTemperature,
+            hourlySteps: loadedCalendarHourlySteps,
+            hourlyExerciseMinutes: loadedCalendarHourlyExercise,
+            hourlyHeartRate: loadedCalendarHourlyHeartRate,
+            hourlyRespiratoryRate: loadedCalendarHourlyRespiratoryRate,
+            referenceBaseline: baseline
         )
         let intradayStateTrail = deriveIntradayStateTrail(
             steps: loadedHourlySteps,
             exerciseMinutes: loadedHourlyExercise,
             heartRate: loadedHourlyHeartRate,
             respiratoryRate: loadedHourlyRespiratoryRate,
-            snapshot: snapshot
+            snapshot: snapshot,
+            baseline: baseline
         )
 
         return TrendReport(
@@ -297,7 +326,19 @@ extension AmbientHealthStore {
             sleepHours: sleepHours,
             restingHeartRate: loadedRestingHeartRate,
             heartRateVariability: loadedHeartRateVariability,
+            respiratoryRate: loadedRespiratoryRate,
+            oxygenSaturationPercent: loadedOxygenSaturation,
+            wristTemperatureCelsius: loadedWristTemperature,
             sleepStages: loadedSleepStages,
+            calendarSteps: loadedCalendarSteps,
+            calendarExerciseMinutes: loadedCalendarExerciseMinutes,
+            calendarSleepHours: calendarSleepHours,
+            calendarRestingHeartRate: loadedCalendarRestingHeartRate,
+            calendarHeartRateVariability: loadedCalendarHeartRateVariability,
+            calendarRespiratoryRate: loadedCalendarRespiratoryRate,
+            calendarOxygenSaturationPercent: loadedCalendarOxygenSaturation,
+            calendarWristTemperatureCelsius: loadedCalendarWristTemperature,
+            calendarSleepStages: loadedCalendarSleepStages,
             latestSleepStage: loadedLatestSleepStage,
             intradayStateTrail: intradayStateTrail,
             stateTrail: stateTrail,
@@ -318,7 +359,7 @@ extension AmbientHealthStore {
             unit: HKUnit.secondUnit(with: .milli),
             days: days
         )
-        async let respiratoryRate = dailyAverageSeries(
+        async let respiratoryRate = nightlyQuantitySeries(
             for: .respiratoryRate,
             unit: HKUnit.count().unitDivided(by: .minute()),
             days: days
@@ -334,15 +375,15 @@ extension AmbientHealthStore {
 
         return BaselineSummary(
             windowDays: days,
-            restingHeartRate: metricBaseline(from: loadedRestingHeartRate.map(\.value)),
-            heartRateVariability: metricBaseline(from: loadedHeartRateVariability.map(\.value)),
-            respiratoryRate: metricBaseline(from: loadedRespiratoryRate.map(\.value)),
-            sleepHours: metricBaseline(from: loadedSleepStages.map(\.totalSleepHours)),
-            deepSleepPercent: metricBaseline(from: loadedSleepStages.map(\.deepPercent)),
-            remSleepPercent: metricBaseline(from: loadedSleepStages.map(\.remPercent)),
-            awakePercent: metricBaseline(from: loadedSleepStages.map(\.awakePercent)),
-            stepCount: metricBaseline(from: loadedSteps.map(\.value)),
-            exerciseMinutes: metricBaseline(from: loadedExerciseMinutes.map(\.value))
+            restingHeartRate: metricBaseline(from: loadedRestingHeartRate.filter { $0.value > 0 }.map(\.value)),
+            heartRateVariability: metricBaseline(from: loadedHeartRateVariability.filter { $0.value > 0 }.map(\.value)),
+            respiratoryRate: metricBaseline(from: loadedRespiratoryRate.filter { $0.value > 0 }.map(\.value)),
+            sleepHours: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.totalSleepHours)),
+            deepSleepPercent: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.deepPercent)),
+            remSleepPercent: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.remPercent)),
+            awakePercent: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.awakePercent)),
+            stepCount: metricBaseline(from: loadedSteps.filter { $0.value > 0 }.map(\.value)),
+            exerciseMinutes: metricBaseline(from: loadedExerciseMinutes.filter { $0.value > 0 }.map(\.value))
         )
     }
 
@@ -490,12 +531,20 @@ extension AmbientHealthStore {
         for identifier: HKQuantityTypeIdentifier,
         unit: HKUnit
     ) async throws -> [TrendPoint] {
+        try await hourlyCumulativeSeries(for: identifier, unit: unit, days: 1)
+    }
+
+    private func hourlyCumulativeSeries(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        days: Int
+    ) async throws -> [TrendPoint] {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else {
             return []
         }
 
         let calendar = Calendar.current
-        let startDate = calendar.startOfDay(for: Date())
+        let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date())) ?? Date()
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -518,8 +567,14 @@ extension AmbientHealthStore {
                 }
 
                 var runningTotal = 0.0
+                var currentDay: Date?
                 var points: [TrendPoint] = []
                 results?.enumerateStatistics(from: startDate, to: Date()) { statistics, _ in
+                    let bucketDay = calendar.startOfDay(for: statistics.startDate)
+                    if currentDay != bucketDay {
+                        currentDay = bucketDay
+                        runningTotal = 0
+                    }
                     runningTotal += statistics.sumQuantity()?.doubleValue(for: unit) ?? 0
                     points.append(TrendPoint(date: statistics.startDate, value: runningTotal))
                 }
@@ -535,12 +590,20 @@ extension AmbientHealthStore {
         for identifier: HKQuantityTypeIdentifier,
         unit: HKUnit
     ) async throws -> [TrendPoint] {
+        try await hourlyAverageSeries(for: identifier, unit: unit, days: 1)
+    }
+
+    private func hourlyAverageSeries(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        days: Int
+    ) async throws -> [TrendPoint] {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else {
             return []
         }
 
         let calendar = Calendar.current
-        let startDate = calendar.startOfDay(for: Date())
+        let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date())) ?? Date()
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -579,7 +642,8 @@ extension AmbientHealthStore {
         for identifier: HKQuantityTypeIdentifier,
         unit: HKUnit,
         maxAgeHours: Double? = nil,
-        treatZeroAsNil: Bool = true
+        treatZeroAsNil: Bool = true,
+        requireTodaySample: Bool = false
     ) async throws -> Double? {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else {
             return nil
@@ -616,6 +680,13 @@ extension AmbientHealthStore {
                     return
                 }
 
+                if requireTodaySample,
+                   let sample,
+                   !Calendar.current.isDate(sample.endDate, inSameDayAs: Date()) {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
                 let value = sample?.quantity.doubleValue(for: unit)
                 if treatZeroAsNil, let value, value <= 0 {
                     continuation.resume(returning: nil)
@@ -628,22 +699,92 @@ extension AmbientHealthStore {
         }
     }
 
+    private func overnightAverageQuantityForToday(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        treatZeroAsNil: Bool = true
+    ) async throws -> Double? {
+        guard let session = try await primarySleepSessionForToday() else { return nil }
+
+        return try await averageQuantityDuringSession(
+            for: identifier,
+            unit: unit,
+            session: session,
+            treatZeroAsNil: treatZeroAsNil
+        )
+    }
+
+    private func nightlyQuantitySeries(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        days: Int,
+        treatZeroAsNil: Bool = true
+    ) async throws -> [TrendPoint] {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let dayStarts = (0..<days).compactMap { offset in
+            calendar.date(byAdding: .day, value: -(days - 1 - offset), to: todayStart)
+        }
+
+        let sessionsByDay = try await primarySleepSessionsByWakeDay(days: days)
+        let queryStart = calendar.date(byAdding: .day, value: -(days + 3), to: todayStart) ?? todayStart
+        let samples = try await quantitySamples(
+            for: identifier,
+            from: queryStart,
+            to: Date()
+        )
+
+        return dayStarts.map { dayStart in
+            let value = sessionsByDay[dayStart].flatMap {
+                averageValue(from: samples, during: $0, unit: unit, treatZeroAsNil: treatZeroAsNil)
+            } ?? 0
+
+            return TrendPoint(date: dayStart, value: value)
+        }
+    }
+
     private func sleepHoursSinceYesterdayEvening() async throws -> Double? {
-        try await latestCompletedSleepSession()?.breakdown.totalSleepHours
+        try await primarySleepSessionForToday()?.breakdown.totalSleepHours
     }
 
     private func sleepStageBreakdownSinceYesterdayEvening() async throws -> SleepStageBreakdown? {
-        try await latestCompletedSleepSession()?.breakdown
+        try await primarySleepSessionForToday()?.breakdown
     }
 
-    private func latestCompletedSleepSession() async throws -> SleepSessionCluster? {
-        let now = Date()
-        let queryStart = Calendar.current.date(byAdding: .hour, value: -60, to: now) ?? now
-        return try await latestSleepSessionEnding(between: queryStart, and: now)
+    private func latestPrimarySleepSession() async throws -> SleepSessionCluster? {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let sessions = try await sleepSessions(
+            from: calendar.date(byAdding: .day, value: -4, to: todayStart) ?? todayStart,
+            to: Date()
+        )
+
+        let recentDays = (0..<4).compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: todayStart)
+        }
+
+        for dayStart in recentDays {
+            if let session = primarySleepSession(forWakeDay: dayStart, sessions: sessions) {
+                return session
+            }
+        }
+
+        return nil
+    }
+
+    private func primarySleepSessionForToday() async throws -> SleepSessionCluster? {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let sessions = try await sleepSessions(
+            from: calendar.date(byAdding: .day, value: -3, to: todayStart) ?? todayStart,
+            to: Date()
+        )
+
+        return primarySleepSession(forWakeDay: todayStart, sessions: sessions)
     }
 
     private func latestSleepStagePoint() async throws -> SleepStageTrendPoint? {
-        guard let session = try await latestCompletedSleepSession() else { return nil }
+        guard let session = try await latestPrimarySleepSession() else { return nil }
         let breakdown = session.breakdown
         return SleepStageTrendPoint(
             date: Calendar.current.startOfDay(for: session.endDate),
@@ -654,28 +795,29 @@ extension AmbientHealthStore {
         )
     }
 
-    private func sleepSessionEnding(
-        onDayStarting dayStart: Date,
-        nextDay: Date,
-        windowStart: Date
-    ) async throws -> SleepSessionCluster? {
-        guard let session = try await latestSleepSessionEnding(between: windowStart, and: nextDay) else {
-            return nil
+    private func primarySleepSessionsByWakeDay(days: Int) async throws -> [Date: SleepSessionCluster] {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let queryStart = calendar.date(byAdding: .day, value: -(days + 3), to: todayStart) ?? todayStart
+        let sessions = try await sleepSessions(from: queryStart, to: Date())
+
+        var results: [Date: SleepSessionCluster] = [:]
+        for offset in stride(from: days - 1, through: 0, by: -1) {
+            let dayStart = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart
+            if let session = primarySleepSession(forWakeDay: dayStart, sessions: sessions) {
+                results[dayStart] = session
+            }
         }
 
-        guard session.endDate >= dayStart, session.endDate < nextDay else {
-            return nil
-        }
-
-        return session
+        return results
     }
 
-    private func latestSleepSessionEnding(
-        between startDate: Date,
-        and endDate: Date
-    ) async throws -> SleepSessionCluster? {
+    private func sleepSessions(
+        from startDate: Date,
+        to endDate: Date
+    ) async throws -> [SleepSessionCluster] {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
-            return nil
+            return []
         }
 
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [])
@@ -690,7 +832,7 @@ extension AmbientHealthStore {
             ) { _, samples, error in
                 if let error {
                     if Self.isNoDataError(error) {
-                        continuation.resume(returning: nil)
+                        continuation.resume(returning: [])
                         return
                     }
                     continuation.resume(throwing: error)
@@ -705,10 +847,144 @@ extension AmbientHealthStore {
                             && session.breakdown.totalSleepHours > 0
                     }
 
-                continuation.resume(returning: sessions.max(by: { $0.endDate < $1.endDate }))
+                continuation.resume(returning: sessions)
             }
 
             healthStore.execute(query)
+        }
+    }
+
+    private func quantitySamples(
+        for identifier: HKQuantityTypeIdentifier,
+        from startDate: Date,
+        to endDate: Date
+    ) async throws -> [HKQuantitySample] {
+        guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else {
+            return []
+        }
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [])
+        let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: quantityType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: sortDescriptors
+            ) { _, samples, error in
+                if let error {
+                    if Self.isNoDataError(error) {
+                        continuation.resume(returning: [])
+                        return
+                    }
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                continuation.resume(returning: (samples as? [HKQuantitySample]) ?? [])
+            }
+
+            healthStore.execute(query)
+        }
+    }
+
+    private func averageQuantityDuringSession(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        session: SleepSessionCluster,
+        treatZeroAsNil: Bool
+    ) async throws -> Double? {
+        let samples = try await quantitySamples(
+            for: identifier,
+            from: session.startDate,
+            to: session.endDate
+        )
+
+        return averageValue(from: samples, during: session, unit: unit, treatZeroAsNil: treatZeroAsNil)
+    }
+
+    private func averageValue(
+        from samples: [HKQuantitySample],
+        during session: SleepSessionCluster,
+        unit: HKUnit,
+        treatZeroAsNil: Bool
+    ) -> Double? {
+        let overlappingSamples = samples.filter {
+            $0.endDate > session.startDate && $0.startDate < session.endDate
+        }
+
+        guard !overlappingSamples.isEmpty else { return nil }
+
+        var weightedTotal = 0.0
+        var weightedDuration = 0.0
+        var simpleValues: [Double] = []
+
+        for sample in overlappingSamples {
+            let overlapStart = max(sample.startDate, session.startDate)
+            let overlapEnd = min(sample.endDate, session.endDate)
+            let overlapDuration = overlapEnd.timeIntervalSince(overlapStart)
+            let value = sample.quantity.doubleValue(for: unit)
+
+            if overlapDuration > 0 {
+                weightedTotal += value * overlapDuration
+                weightedDuration += overlapDuration
+            } else {
+                simpleValues.append(value)
+            }
+        }
+
+        let resolvedValue: Double?
+        if weightedDuration > 0 {
+            resolvedValue = weightedTotal / weightedDuration
+        } else if !simpleValues.isEmpty {
+            resolvedValue = simpleValues.reduce(0, +) / Double(simpleValues.count)
+        } else {
+            resolvedValue = nil
+        }
+
+        guard let resolvedValue else { return nil }
+        if treatZeroAsNil, resolvedValue <= 0 {
+            return nil
+        }
+
+        return resolvedValue
+    }
+
+    private func primarySleepSession(
+        forWakeDay dayStart: Date,
+        sessions: [SleepSessionCluster]
+    ) -> SleepSessionCluster? {
+        let calendar = Calendar.current
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+
+        let sameWakeDay = sessions.filter {
+            $0.endDate >= dayStart
+                && $0.endDate < nextDay
+                && $0.breakdown.totalSleepHours > 0
+        }
+
+        guard !sameWakeDay.isEmpty else { return nil }
+
+        let crossesIntoWakeDay = sameWakeDay.filter { $0.startDate < dayStart }
+        let earlyMorning = sameWakeDay.filter {
+            calendar.component(.hour, from: $0.endDate) <= 12 && $0.breakdown.totalSleepHours >= 3
+        }
+
+        let candidates: [SleepSessionCluster]
+        if !crossesIntoWakeDay.isEmpty {
+            candidates = crossesIntoWakeDay
+        } else if !earlyMorning.isEmpty {
+            candidates = earlyMorning
+        } else {
+            candidates = sameWakeDay
+        }
+
+        return candidates.max { lhs, rhs in
+            if lhs.breakdown.totalSleepHours == rhs.breakdown.totalSleepHours {
+                return lhs.endDate < rhs.endDate
+            }
+            return lhs.breakdown.totalSleepHours < rhs.breakdown.totalSleepHours
         }
     }
 
@@ -835,50 +1111,17 @@ extension AmbientHealthStore {
     }
 
     private func dailySleepStageSeries(days: Int) async throws -> [SleepStageTrendPoint] {
-        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
-            return []
-        }
-
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
         let queryStart = calendar.date(byAdding: .day, value: -(days + 3), to: todayStart)!
-        let queryEnd = Date()
-        let predicate = HKQuery.predicateForSamples(withStart: queryStart, end: queryEnd, options: [])
-        let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
-
-        let sessions: [SleepSessionCluster] = try await withCheckedThrowingContinuation { continuation in
-            let query = HKSampleQuery(
-                sampleType: sleepType,
-                predicate: predicate,
-                limit: HKObjectQueryNoLimit,
-                sortDescriptors: sortDescriptors
-            ) { _, samples, error in
-                if let error {
-                    if Self.isNoDataError(error) {
-                        continuation.resume(returning: [])
-                        return
-                    }
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                let sleepSamples = (samples as? [HKCategorySample]) ?? []
-                continuation.resume(returning: Self.buildSleepSessions(from: sleepSamples))
-            }
-
-            healthStore.execute(query)
-        }
-
-        let sessionsByDay = Dictionary(grouping: sessions) { session in
-            calendar.startOfDay(for: session.endDate)
-        }
+        let sessions = try await sleepSessions(from: queryStart, to: Date())
 
         var points: [SleepStageTrendPoint] = []
         for offset in stride(from: days - 1, through: 0, by: -1) {
             let dayStart = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart
 
-            if let sessionsForDay = sessionsByDay[dayStart], !sessionsForDay.isEmpty {
-                let breakdown = combinedSleepBreakdown(for: sessionsForDay)
+            if let session = primarySleepSession(forWakeDay: dayStart, sessions: sessions) {
+                let breakdown = session.breakdown
                 points.append(
                     SleepStageTrendPoint(
                         date: dayStart,
@@ -922,7 +1165,6 @@ extension AmbientHealthStore {
             unspecifiedSleepHours: 0
         )
     }
-
 
     private func categoryDurationToday(
         for identifier: HKCategoryTypeIdentifier
