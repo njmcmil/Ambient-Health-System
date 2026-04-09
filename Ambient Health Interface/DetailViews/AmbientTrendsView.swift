@@ -249,6 +249,9 @@ private struct AmbientEnergyRhythmCard: View {
     let exerciseMinutes: [AmbientHealthStore.TrendPoint]
 
     var body: some View {
+        let displaySteps = weeklyTrendWindowEndingToday(steps)
+        let displayExercise = weeklyTrendWindowEndingToday(exerciseMinutes)
+
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Energy Rhythm", symbol: "figure.walk.arrival", tint: .green)
 
@@ -256,19 +259,21 @@ private struct AmbientEnergyRhythmCard: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            if let avgSteps = weeklyAverage(for: steps), let avgExercise = weeklyAverage(for: exerciseMinutes) {
+            if let avgSteps = weeklyAverage(for: displaySteps), let avgExercise = weeklyAverage(for: displayExercise) {
                 HStack(spacing: 12) {
                     AmbientMiniMetric(title: "Weekly Avg Steps", value: Int(avgSteps).formatted())
                     AmbientMiniMetric(title: "Weekly Avg Exercise", value: "\(Int(avgExercise)) min")
                 }
             }
 
-            Text(combinedEnergySummary(steps: steps, exerciseMinutes: exerciseMinutes))
+            Text(combinedEnergySummary(steps: displaySteps, exerciseMinutes: displayExercise))
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
 
-            let displayPoints = weeklyTrendWindow(steps)
-            let exerciseMap = Dictionary(uniqueKeysWithValues: exerciseMinutes.map { ($0.date, $0.value) })
+            let displayPoints = displaySteps
+            let exerciseMap = Dictionary(
+                uniqueKeysWithValues: displayExercise.map { ($0.date, $0.value) }
+            )
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 7) {
@@ -421,14 +426,14 @@ private struct AmbientHRVTrendCard: View {
     let baseline: AmbientHealthStore.MetricBaseline?
 
     var body: some View {
+        let displayPoints = weeklyTrendWindowEndingToday(points)
+
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Heart Rate Variability", symbol: "waveform.path", tint: .teal)
 
             Text("A softer read on recovery and tension over the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-
-            let displayPoints = weeklyTrendWindow(points)
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 6) {
@@ -508,7 +513,7 @@ private struct AmbientHRVTrendCard: View {
             }
 
             Text(weeklyTrendSummary(
-                points: points,
+                points: displayPoints,
                 lowMeaning: "HRV has looked a bit lower than your recent norm, which can line up with more strain or less recovery",
                 highMeaning: "HRV has looked stronger than your recent norm, which usually points to steadier recovery",
                 unit: "ms",
@@ -702,14 +707,14 @@ private struct AmbientHeartTrendCard: View {
     let baseline: AmbientHealthStore.MetricBaseline?
 
     var body: some View {
+        let displayPoints = weeklyTrendWindowEndingToday(points)
+
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Resting Heart Rate", symbol: "heart.circle.fill", tint: Color(red: 1.0, green: 0.20, blue: 0.22))
 
             Text("A softer view of whether your system has looked calmer or more activated over the past week.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-
-            let displayPoints = weeklyTrendWindow(points)
 
             if !displayPoints.isEmpty {
                 HStack(alignment: .bottom, spacing: 4) {
@@ -787,7 +792,7 @@ private struct AmbientHeartTrendCard: View {
             }
 
             Text(inverseWeeklyTrendSummary(
-                points: points,
+                points: displayPoints,
                 lowMeaning: "your resting rhythm has looked calmer than your weekly norm",
                 highMeaning: "your resting rhythm has looked a little more activated than your weekly norm",
                 unit: "bpm",
@@ -837,6 +842,29 @@ private struct AmbientHeartTrendCard: View {
 /// Keeps chart layouts stable across the week, even when some days have no data yet.
 private func weeklyTrendWindow(_ points: [AmbientHealthStore.TrendPoint]) -> [AmbientHealthStore.TrendPoint] {
     Array(points.suffix(ambientWeeklyVisibleDays))
+}
+
+/// Builds a fixed 7-day strip that always ends on today for non-sleep trend cards.
+///
+/// This keeps HRV, resting heart rate, and movement visually anchored to the current day,
+/// while still showing placeholders when today's sample has not landed yet.
+private func weeklyTrendWindowEndingToday(_ points: [AmbientHealthStore.TrendPoint]) -> [AmbientHealthStore.TrendPoint] {
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: Date())
+    let pointMap = Dictionary(
+        uniqueKeysWithValues: points.map { (calendar.startOfDay(for: $0.date), $0.value) }
+    )
+
+    return (0..<ambientWeeklyVisibleDays).compactMap { offset in
+        guard let day = calendar.date(byAdding: .day, value: offset - (ambientWeeklyVisibleDays - 1), to: today) else {
+            return nil
+        }
+
+        return AmbientHealthStore.TrendPoint(
+            date: day,
+            value: pointMap[day] ?? 0
+        )
+    }
 }
 
 private struct AmbientSleepQualitySummaryCard: View {
