@@ -606,12 +606,13 @@ struct AmbientSettingsView: View {
             guard let sleepStages = snapshot.sleepStages, sleepStages.totalSleepHours > 0 else {
                 return "No recent data"
             }
-            return "Deep \(Int(sleepStages.deepPercent.rounded()))% • REM \(Int(sleepStages.remPercent.rounded()))% • Awake \(Int(sleepStages.awakePercent.rounded()))%"
+            return "Score \(Int(sleepStages.sleepScore.rounded())) • Deep \(Int(sleepStages.deepPercent.rounded()))% • REM \(Int(sleepStages.remPercent.rounded()))% • Awake \(Int(sleepStages.awakePercent.rounded()))%"
         }()
 
         return [
             .init(label: "Sleep Duration", value: sleepValue),
             .init(label: "Sleep Quality", value: sleepQualityValue),
+            .init(label: "Sleep Score", value: snapshot.sleepScore.map { "\(Int($0.rounded()))" } ?? "No recent data"),
             .init(label: "Breathing Overnight", value: formatDecimal(snapshot.respiratoryRate, suffix: "/min")),
             .init(label: "Oxygen Saturation", value: formatPercent(snapshot.oxygenSaturationPercent)),
             .init(label: "Wrist Temperature", value: formatTemperature(snapshot.wristTemperatureCelsius)),
@@ -634,6 +635,7 @@ struct AmbientSettingsView: View {
         [
             .init(label: "In Bed", value: String(format: "%.1f h", sleepStages.inBedHours)),
             .init(label: "Asleep", value: String(format: "%.1f h", sleepStages.totalSleepHours)),
+            .init(label: "Sleep Score", value: "\(Int(sleepStages.sleepScore.rounded()))"),
             .init(label: "Core Sleep", value: String(format: "%.1f h • %d%%", sleepStages.coreHours, Int(max(0, 100 - sleepStages.deepPercent - sleepStages.remPercent - sleepStages.awakePercent).rounded()))),
             .init(label: "Deep Sleep", value: String(format: "%.1f h • %d%%", sleepStages.deepHours, Int(sleepStages.deepPercent.rounded()))),
             .init(label: "REM Sleep", value: String(format: "%.1f h • %d%%", sleepStages.remHours, Int(sleepStages.remPercent.rounded()))),

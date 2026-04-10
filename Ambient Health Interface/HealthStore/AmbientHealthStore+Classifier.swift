@@ -83,6 +83,9 @@ extension AmbientHealthStore {
 
         let sleepStages = snapshot.sleepStages
         let mindfulMinutes = snapshot.mindfulMinutesToday ?? 0
+        let sleepScore = snapshot.sleepScore
+            ?? baseline?.sleepScore?.mean
+            ?? 76
 
         let deepSleepPercent = sleepStages?.deepPercent
             ?? baseline?.deepSleepPercent?.mean
@@ -118,6 +121,8 @@ extension AmbientHealthStore {
         let deepSleepDebt = negativeDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent)
         let remSleepDebt = negativeDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
         let awakeStrain = positiveDeviation(current: awakePercent, baseline: baseline?.awakePercent)
+        let sleepScoreDebt = negativeDeviation(current: sleepScore, baseline: baseline?.sleepScore)
+        let sleepScoreSupport = positiveDeviation(current: sleepScore, baseline: baseline?.sleepScore)
         let sleepSurplus = positiveDeviation(current: sleepHours, baseline: baseline?.sleepHours)
         let stepDeficit = negativeDeviation(current: steps, baseline: baseline?.stepCount)
         let exerciseDeficit = negativeDeviation(current: exerciseMinutes, baseline: baseline?.exerciseMinutes)
@@ -129,14 +134,34 @@ extension AmbientHealthStore {
             baseline?.restingHeartRate,
             baseline?.heartRateVariability,
             baseline?.respiratoryRate,
-            baseline?.sleepHours
+            baseline?.sleepHours,
+            baseline?.sleepScore
         ].compactMap { $0 }
          .filter(\.isReliable)
          .count
 
         // MARK: Sleep quality
-        let sleepStageStrong = deepSleepPercent >= 16 && remSleepPercent >= 19 && awakePercent <= 10 && sleepEfficiency >= 85
-        let sleepStageWeak = deepSleepPercent < 10 || remSleepPercent < 15 || awakePercent >= 16 || sleepEfficiency < 80
+        let sleepScoreStrong = baseline != nil
+            ? sleepScoreSupport >= moderateRecoveryThreshold * 0.9
+            : sleepScore >= 80
+        let sleepScoreWeak = baseline != nil
+            ? sleepScoreDebt >= moderateRecoveryThreshold * 0.9
+            : sleepScore <= 68
+        let sleepStageStrong = (
+            deepSleepPercent >= 16
+            && remSleepPercent >= 19
+            && awakePercent <= 10
+            && sleepEfficiency >= 85
+        ) || (
+            sleepScoreStrong
+            && awakePercent <= 12
+            && sleepHours >= 6.8
+        )
+        let sleepStageWeak = deepSleepPercent < 10
+            || remSleepPercent < 15
+            || awakePercent >= 16
+            || sleepEfficiency < 80
+            || sleepScoreWeak
 
         // MARK: Stress signals
         let fallbackStressSignals = [
@@ -158,7 +183,8 @@ extension AmbientHealthStore {
             restingStrain >= moderateStressThreshold,
             hrvStrain >= moderateStressThreshold,
             respiratoryStrain >= moderateStressThreshold,
-            sleepDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.8
+            sleepDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.8,
+            sleepScoreDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.7
         ].filter { $0 }.count
 
         let strongStressSignals = [
@@ -166,10 +192,11 @@ extension AmbientHealthStore {
             hrvStrain >= strongStressThreshold,
             respiratoryStrain >= strongStressThreshold,
             awakeStrain >= strongStressThreshold,
-            sleepDebt >= strongStressThreshold
+            sleepDebt >= strongStressThreshold,
+            sleepScoreDebt >= strongStressThreshold
         ].filter { $0 }.count
 
-        let layeredStressLoad = [restingStrain, hrvStrain, respiratoryStrain, max(sleepDebt, awakeStrain)]
+        let layeredStressLoad = [restingStrain, hrvStrain, respiratoryStrain, max(max(sleepDebt, awakeStrain), sleepScoreDebt)]
             .sorted(by: >)
             .prefix(2)
             .reduce(0, +)
@@ -183,6 +210,7 @@ extension AmbientHealthStore {
             negativeDeviation(current: restingHeartRate, baseline: baseline?.restingHeartRate),
             positiveDeviation(current: heartRateVariability, baseline: baseline?.heartRateVariability),
             positiveDeviation(current: sleepHours, baseline: baseline?.sleepHours),
+            sleepScoreSupport,
             positiveDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent),
             positiveDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
         ]
@@ -191,11 +219,12 @@ extension AmbientHealthStore {
         let exceptionalRecoverySignals = recoverySupport.filter { $0 >= strongRecoveryThreshold }.count
 
         let recoveryWeak = baselineReliability >= 2
-            ? ([sleepDebt, deepSleepDebt, remSleepDebt, awakeStrain, restingStrain, hrvStrain]
+            ? ([sleepDebt, sleepScoreDebt, deepSleepDebt, remSleepDebt, awakeStrain, restingStrain, hrvStrain]
                 .filter { $0 >= moderateRecoveryThreshold }
                 .count >= 2)
             : (sleepHours < interpolate(low: Thresholds.sleepLow, high: Thresholds.sleepHigh, factor: recoveryWeight)
                || sleepStageWeak
+               || sleepScore <= interpolate(low: 68, high: 74, factor: recoveryWeight)
                || heartRateVariability < interpolate(low: Thresholds.hrvRecoveryLow, high: Thresholds.hrvRecoveryHigh, factor: recoveryWeight)
                || restingHeartRate >= interpolate(low: Thresholds.restingHRRecoveryLow, high: Thresholds.restingHRRecoveryHigh, factor: recoveryWeight))
 
@@ -211,6 +240,7 @@ extension AmbientHealthStore {
         let recoveryStrong = strongRecoverySignals >= 3
             && exceptionalRecoverySignals >= 1
             && sleepStageStrong
+            && sleepScore >= 76
             && restingHeartRate <= 75
             && !oversleepConcern
 
@@ -725,6 +755,10 @@ extension AmbientHealthStore {
             heartRateVariability: metricBaseline(from: hrvValues),
             respiratoryRate: metricBaseline(from: respiratoryValues),
             sleepHours: metricBaseline(from: sleepHourValues),
+            sleepScore: metricBaseline(from: sleepStages
+                .filter { $0.date >= windowStart && $0.date < day }
+                .filter { $0.totalSleepHours > 0 }
+                .map(\.sleepScore)),
             deepSleepPercent: metricBaseline(from: deepValues),
             remSleepPercent: metricBaseline(from: remValues),
             awakePercent: metricBaseline(from: awakeValues),
@@ -737,6 +771,7 @@ extension AmbientHealthStore {
             summary.heartRateVariability != nil ||
             summary.respiratoryRate != nil ||
             summary.sleepHours != nil ||
+            summary.sleepScore != nil ||
             summary.deepSleepPercent != nil ||
             summary.remSleepPercent != nil ||
             summary.awakePercent != nil ||
@@ -786,6 +821,9 @@ extension AmbientHealthStore {
 
         let sleepStages = snapshot.sleepStages
         let mindfulMinutes = snapshot.mindfulMinutesToday ?? 0
+        let sleepScore = snapshot.sleepScore
+            ?? baseline?.sleepScore?.mean
+            ?? 76
 
         let deepSleepPercent = sleepStages?.deepPercent
             ?? baseline?.deepSleepPercent?.mean
@@ -819,6 +857,8 @@ extension AmbientHealthStore {
         let deepSleepDebt = negativeDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent)
         let remSleepDebt = negativeDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
         let awakeStrain = positiveDeviation(current: awakePercent, baseline: baseline?.awakePercent)
+        let sleepScoreDebt = negativeDeviation(current: sleepScore, baseline: baseline?.sleepScore)
+        let sleepScoreSupport = positiveDeviation(current: sleepScore, baseline: baseline?.sleepScore)
         let sleepSurplus = positiveDeviation(current: sleepHours, baseline: baseline?.sleepHours)
         let stepDeficit = negativeDeviation(current: steps, baseline: baseline?.stepCount)
         let exerciseDeficit = negativeDeviation(current: exerciseMinutes, baseline: baseline?.exerciseMinutes)
@@ -829,13 +869,33 @@ extension AmbientHealthStore {
             baseline?.restingHeartRate,
             baseline?.heartRateVariability,
             baseline?.respiratoryRate,
-            baseline?.sleepHours
+            baseline?.sleepHours,
+            baseline?.sleepScore
         ].compactMap { $0 }
             .filter(\.isReliable)
             .count
 
-        let sleepStageStrong = deepSleepPercent >= 16 && remSleepPercent >= 19 && awakePercent <= 10 && sleepEfficiency >= 85
-        let sleepStageWeak = deepSleepPercent < 10 || remSleepPercent < 15 || awakePercent >= 16 || sleepEfficiency < 80
+        let sleepScoreStrong = baseline != nil
+            ? sleepScoreSupport >= moderateRecoveryThreshold * 0.9
+            : sleepScore >= 80
+        let sleepScoreWeak = baseline != nil
+            ? sleepScoreDebt >= moderateRecoveryThreshold * 0.9
+            : sleepScore <= 68
+        let sleepStageStrong = (
+            deepSleepPercent >= 16
+            && remSleepPercent >= 19
+            && awakePercent <= 10
+            && sleepEfficiency >= 85
+        ) || (
+            sleepScoreStrong
+            && awakePercent <= 12
+            && sleepHours >= 6.8
+        )
+        let sleepStageWeak = deepSleepPercent < 10
+            || remSleepPercent < 15
+            || awakePercent >= 16
+            || sleepEfficiency < 80
+            || sleepScoreWeak
 
         let fallbackStressSignals = [
             restingHeartRate >= interpolate(low: 86, high: 78, factor: stressWeight),
@@ -856,7 +916,8 @@ extension AmbientHealthStore {
             restingStrain >= moderateStressThreshold,
             hrvStrain >= moderateStressThreshold,
             respiratoryStrain >= moderateStressThreshold,
-            sleepDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.8
+            sleepDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.8,
+            sleepScoreDebt >= moderateStressThreshold && awakeStrain >= moderateStressThreshold * 0.7
         ].filter { $0 }.count
 
         let strongStressSignals = [
@@ -864,10 +925,11 @@ extension AmbientHealthStore {
             hrvStrain >= strongStressThreshold,
             respiratoryStrain >= strongStressThreshold,
             awakeStrain >= strongStressThreshold,
-            sleepDebt >= strongStressThreshold
+            sleepDebt >= strongStressThreshold,
+            sleepScoreDebt >= strongStressThreshold
         ].filter { $0 }.count
 
-        let layeredStressLoad = [restingStrain, hrvStrain, respiratoryStrain, max(sleepDebt, awakeStrain)]
+        let layeredStressLoad = [restingStrain, hrvStrain, respiratoryStrain, max(max(sleepDebt, awakeStrain), sleepScoreDebt)]
             .sorted(by: >)
             .prefix(2)
             .reduce(0, +)
@@ -880,6 +942,7 @@ extension AmbientHealthStore {
             negativeDeviation(current: restingHeartRate, baseline: baseline?.restingHeartRate),
             positiveDeviation(current: heartRateVariability, baseline: baseline?.heartRateVariability),
             positiveDeviation(current: sleepHours, baseline: baseline?.sleepHours),
+            sleepScoreSupport,
             positiveDeviation(current: deepSleepPercent, baseline: baseline?.deepSleepPercent),
             positiveDeviation(current: remSleepPercent, baseline: baseline?.remSleepPercent)
         ]
@@ -888,13 +951,14 @@ extension AmbientHealthStore {
         let exceptionalRecoverySignals = recoverySupport.filter { $0 >= strongRecoveryThreshold }.count
 
         let recoveryWeak = baselineReliability >= 2
-            ? ([sleepDebt, deepSleepDebt, remSleepDebt, awakeStrain, restingStrain, hrvStrain]
+            ? ([sleepDebt, sleepScoreDebt, deepSleepDebt, remSleepDebt, awakeStrain, restingStrain, hrvStrain]
                 .filter { $0 >= moderateRecoveryThreshold }
                 .count >= 2)
             : (sleepHours < interpolate(low: Thresholds.sleepLow, high: Thresholds.sleepHigh, factor: recoveryWeight)
-               || sleepStageWeak
-               || heartRateVariability < interpolate(low: Thresholds.hrvRecoveryLow, high: Thresholds.hrvRecoveryHigh, factor: recoveryWeight)
-               || restingHeartRate >= interpolate(low: Thresholds.restingHRRecoveryLow, high: Thresholds.restingHRRecoveryHigh, factor: recoveryWeight))
+                || sleepStageWeak
+                || sleepScore <= interpolate(low: 68, high: 74, factor: recoveryWeight)
+                || heartRateVariability < interpolate(low: Thresholds.hrvRecoveryLow, high: Thresholds.hrvRecoveryHigh, factor: recoveryWeight)
+                || restingHeartRate >= interpolate(low: Thresholds.restingHRRecoveryLow, high: Thresholds.restingHRRecoveryHigh, factor: recoveryWeight))
 
         let oversleepConcern = (
             sleepHours >= 9.25
@@ -908,6 +972,7 @@ extension AmbientHealthStore {
         let recoveryStrong = strongRecoverySignals >= 3
             && exceptionalRecoverySignals >= 1
             && sleepStageStrong
+            && sleepScore >= 76
             && restingHeartRate <= 75
             && !oversleepConcern
 
@@ -1066,6 +1131,7 @@ extension AmbientHealthStore {
                     "HRV: \(f1(heartRateVariability))",
                     "Respiratory: \(f1(respiratoryRate))",
                     "Sleep hours: \(f2(sleepHours))",
+                    "Sleep score: \(f1(sleepScore))",
                     "Sleep stages deep/rem/awake: \(f1(deepSleepPercent)) / \(f1(remSleepPercent)) / \(f1(awakePercent))",
                     "Sleep efficiency: \(f1(sleepEfficiency))",
                     "Mindful minutes: \(f1(mindfulMinutes))",
@@ -1080,6 +1146,7 @@ extension AmbientHealthStore {
                     baselineLine("HRV baseline", baseline?.heartRateVariability),
                     baselineLine("Respiratory baseline", baseline?.respiratoryRate),
                     baselineLine("Sleep hours baseline", baseline?.sleepHours),
+                    baselineLine("Sleep score baseline", baseline?.sleepScore),
                     baselineLine("Steps baseline", baseline?.stepCount),
                     baselineLine("Exercise baseline", baseline?.exerciseMinutes),
                     "Baseline reliability count: \(baselineReliability)"
@@ -1105,6 +1172,7 @@ extension AmbientHealthStore {
                     "HRV strain: \(f2(hrvStrain))",
                     "Respiratory strain: \(f2(respiratoryStrain))",
                     "Sleep debt: \(f2(sleepDebt))",
+                    "Sleep score debt/support: \(f2(sleepScoreDebt)) / \(f2(sleepScoreSupport))",
                     "Deep sleep debt: \(f2(deepSleepDebt))",
                     "REM sleep debt: \(f2(remSleepDebt))",
                     "Awake strain: \(f2(awakeStrain))",
@@ -1118,6 +1186,7 @@ extension AmbientHealthStore {
                 lines: [
                     "sleepStageStrong: \(bool(sleepStageStrong))",
                     "sleepStageWeak: \(bool(sleepStageWeak))",
+                    "sleepScoreStrong / sleepScoreWeak: \(bool(sleepScoreStrong)) / \(bool(sleepScoreWeak))",
                     "stressElevated: \(bool(stressElevated))",
                     "recoveryWeak: \(bool(recoveryWeak))",
                     "recoveryStrong: \(bool(recoveryStrong))",

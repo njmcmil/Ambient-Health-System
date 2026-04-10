@@ -241,8 +241,6 @@ private func sleepStageInsightLine(
     from sleepStages: AmbientHealthStore.SleepStageBreakdown,
     baseline: AmbientHealthStore.BaselineSummary?
 ) -> String {
-    let awake = Int(sleepStages.awakePercent.rounded())
-
     if isHigherThanUsual(sleepStages.awakePercent, baseline: baseline?.awakePercent, fallbackThreshold: 16, minimumSpread: 3) {
         return "Sleep looked more broken up than usual, so recovery may have felt less complete."
     }

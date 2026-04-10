@@ -707,28 +707,37 @@ func sleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> Str
         return "Not enough recent sleep-stage data yet."
     }
 
+    let averageScore = meaningfulPoints.map(\.sleepScore).reduce(0, +) / Double(meaningfulPoints.count)
     let averageCore = meaningfulPoints.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(meaningfulPoints.count)
     let averageDeep = meaningfulPoints.map(\.deepPercent).reduce(0, +) / Double(meaningfulPoints.count)
     let averageREM = meaningfulPoints.map(\.remPercent).reduce(0, +) / Double(meaningfulPoints.count)
     let averageAwake = meaningfulPoints.map(\.awakePercent).reduce(0, +) / Double(meaningfulPoints.count)
 
+    if averageScore >= 82 {
+        return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep has looked fairly restorative this week, with duration and overnight sleep quality landing in a stronger range."
+    }
+
+    if averageScore <= 68 {
+        return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep has looked softer this week, which usually means duration, stage balance, or interruptions have been less supportive."
+    }
+
     if averageDeep >= 15, averageREM >= 19, averageAwake <= 11 {
-        return "Sleep has looked fairly restorative this week, with a healthy balance of core, deep, and REM sleep plus limited overnight awake time."
+        return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep has looked fairly restorative this week, with a healthy balance of core, deep, and REM sleep plus limited overnight awake time."
     }
 
     if averageAwake >= 14 {
-        return "Sleep has looked more broken up this week, with more awake time overnight. That usually means sleep happened, but recovery may have felt less complete."
+        return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep has looked more broken up this week, with more awake time overnight. That usually means sleep happened, but recovery may have felt less complete."
     }
 
     if averageDeep < 11 || averageREM < 16 {
-        return "Sleep has looked lighter this week, with less time reaching deeper or dream-heavy stages. That can leave energy and mood feeling less restored, even if total sleep was okay."
+        return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep has looked lighter this week, with less time reaching deeper or dream-heavy stages. That can leave energy and mood feeling less restored, even if total sleep was okay."
     }
 
     if averageCore >= 66 {
-        return "Sleep has leaned heavily on core sleep this week. That is not automatically bad, but it can feel less restoring when deep and REM sleep stay on the lower side."
+        return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep has leaned heavily on core sleep this week. That is not automatically bad, but it can feel less restoring when deep and REM sleep stay on the lower side."
     }
 
-    return "Sleep quality looks mixed this week: not especially poor, but not strongly restorative either."
+    return "Weekly sleep score is \(Int(averageScore.rounded())). Sleep quality looks mixed this week: not especially poor, but not strongly restorative either."
 }
 
 func calmerSleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) -> String {
@@ -738,10 +747,19 @@ func calmerSleepStageSummary(points: [AmbientHealthStore.SleepStageTrendPoint]) 
         return "There is not enough recent sleep-stage data to describe this gently yet."
     }
 
+    let averageScore = meaningfulPoints.map(\.sleepScore).reduce(0, +) / Double(meaningfulPoints.count)
     let averageCore = meaningfulPoints.map { max(0, 100 - $0.deepPercent - $0.remPercent - $0.awakePercent) }.reduce(0, +) / Double(meaningfulPoints.count)
     let averageDeep = meaningfulPoints.map(\.deepPercent).reduce(0, +) / Double(meaningfulPoints.count)
     let averageREM = meaningfulPoints.map(\.remPercent).reduce(0, +) / Double(meaningfulPoints.count)
     let averageAwake = meaningfulPoints.map(\.awakePercent).reduce(0, +) / Double(meaningfulPoints.count)
+
+    if averageScore >= 82 {
+        return "Weekly sleep score is \(Int(averageScore.rounded())), which points to fairly supportive sleep this week."
+    }
+
+    if averageScore <= 68 {
+        return "Weekly sleep score is \(Int(averageScore.rounded())), which points to sleep feeling a little less supportive this week."
+    }
 
     if averageDeep >= 15, averageREM >= 19, averageAwake <= 11 {
         return "Sleep quality looks fairly supportive this week."

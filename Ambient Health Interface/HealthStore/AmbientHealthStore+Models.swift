@@ -87,6 +87,16 @@ extension AmbientHealthStore {
         let awakePercent: Double
 
         var id: Date { date }
+
+        var sleepScore: Double {
+            SleepStageBreakdown.derivedSleepScore(
+                totalSleepHours: totalSleepHours,
+                deepPercent: deepPercent,
+                remPercent: remPercent,
+                awakePercent: awakePercent,
+                efficiencyPercent: nil
+            )
+        }
     }
 
     struct StateTrendPoint: Identifiable {
@@ -114,6 +124,7 @@ extension AmbientHealthStore {
         let heartRateVariability: MetricBaseline?
         let respiratoryRate: MetricBaseline?
         let sleepHours: MetricBaseline?
+        let sleepScore: MetricBaseline?
         let deepSleepPercent: MetricBaseline?
         let remSleepPercent: MetricBaseline?
         let awakePercent: MetricBaseline?
@@ -179,8 +190,96 @@ extension AmbientHealthStore {
             return (totalSleepHours / inBedHours) * 100
         }
 
+        var sleepScore: Double {
+            Self.derivedSleepScore(
+                totalSleepHours: totalSleepHours,
+                deepPercent: deepPercent,
+                remPercent: remPercent,
+                awakePercent: awakePercent,
+                efficiencyPercent: efficiencyPercent
+            )
+        }
+
         var summaryLine: String {
             "Sleep \(String(format: "%.1f", totalSleepHours)) h  •  Deep \(Int(deepPercent))%  •  REM \(Int(remPercent))%  •  Awake \(Int(awakePercent))%"
+        }
+
+        static func derivedSleepScore(
+            totalSleepHours: Double,
+            deepPercent: Double,
+            remPercent: Double,
+            awakePercent: Double,
+            efficiencyPercent: Double?
+        ) -> Double {
+            guard totalSleepHours > 0 else { return 0 }
+
+            let durationComponent: Double = {
+                switch totalSleepHours {
+                case ..<4.5:
+                    return 0.25
+                case 4.5..<6.0:
+                    return interpolate(totalSleepHours, from: 4.5...6.0, to: 0.25...0.72)
+                case 6.0..<7.0:
+                    return interpolate(totalSleepHours, from: 6.0...7.0, to: 0.72...0.90)
+                case 7.0...9.0:
+                    return 1.0
+                case 9.0...10.5:
+                    let progress = min(max((totalSleepHours - 9.0) / 1.5, 0), 1)
+                    return 0.90 - (progress * 0.20)
+                default:
+                    return max(0.45, 0.70 - ((totalSleepHours - 10.5) * 0.08))
+                }
+            }()
+
+            let deepComponent = bandScore(value: deepPercent, ideal: 15...23, acceptable: 8...30)
+            let remComponent = bandScore(value: remPercent, ideal: 18...27, acceptable: 12...32)
+            let awakeComponent: Double = {
+                if awakePercent <= 10 { return 1.0 }
+                if awakePercent >= 22 { return 0.0 }
+                return 1 - ((awakePercent - 10) / 12)
+            }()
+            let efficiencyComponent = efficiencyPercent.map {
+                if $0 >= 90 { return 1.0 }
+                if $0 <= 75 { return 0.0 }
+                return ($0 - 75) / 15
+            }
+
+            let weightedComponents: [(Double, Double)] = [
+                (durationComponent, 0.35),
+                (deepComponent, 0.15),
+                (remComponent, 0.15),
+                (awakeComponent, 0.20),
+                (efficiencyComponent ?? 0, efficiencyComponent == nil ? 0 : 0.15)
+            ]
+
+            let weightTotal = weightedComponents.reduce(0) { $0 + $1.1 }
+            guard weightTotal > 0 else { return 0 }
+
+            let normalizedScore = weightedComponents.reduce(0) { partial, item in
+                partial + (item.0 * item.1)
+            } / weightTotal
+
+            return min(max((normalizedScore * 100).rounded(), 0), 100)
+        }
+
+        private static func bandScore(value: Double, ideal: ClosedRange<Double>, acceptable: ClosedRange<Double>) -> Double {
+            if ideal.contains(value) {
+                return 1.0
+            }
+
+            if value < ideal.lowerBound {
+                guard ideal.lowerBound > acceptable.lowerBound else { return 0 }
+                return max(0, (value - acceptable.lowerBound) / (ideal.lowerBound - acceptable.lowerBound))
+            }
+
+            guard acceptable.upperBound > ideal.upperBound else { return 0 }
+            return max(0, (acceptable.upperBound - value) / (acceptable.upperBound - ideal.upperBound))
+        }
+
+        private static func interpolate(_ value: Double, from input: ClosedRange<Double>, to output: ClosedRange<Double>) -> Double {
+            guard input.upperBound > input.lowerBound else { return output.lowerBound }
+            let progress = min(max((value - input.lowerBound) / (input.upperBound - input.lowerBound), 0), 1)
+            return output.lowerBound + ((output.upperBound - output.lowerBound) * progress)
         }
     }
 
@@ -268,6 +367,10 @@ extension AmbientHealthStore {
         let sleepStages: SleepStageBreakdown?
         let mindfulMinutesToday: Double?
         let sampledAt: Date
+
+        var sleepScore: Double? {
+            sleepStages?.sleepScore
+        }
         
         var heartRateDelta: Double? {
             guard let current = currentHeartRate,

@@ -379,6 +379,7 @@ extension AmbientHealthStore {
             heartRateVariability: metricBaseline(from: loadedHeartRateVariability.filter { $0.value > 0 }.map(\.value)),
             respiratoryRate: metricBaseline(from: loadedRespiratoryRate.filter { $0.value > 0 }.map(\.value)),
             sleepHours: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.totalSleepHours)),
+            sleepScore: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.sleepScore)),
             deepSleepPercent: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.deepPercent)),
             remSleepPercent: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.remPercent)),
             awakePercent: metricBaseline(from: loadedSleepStages.filter { $0.totalSleepHours > 0 }.map(\.awakePercent)),

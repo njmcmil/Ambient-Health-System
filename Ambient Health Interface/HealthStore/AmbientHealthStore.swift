@@ -541,6 +541,7 @@ final class AmbientHealthStore: ObservableObject {
             heartRateVariability: MetricBaseline(mean: 39.2, standardDeviation: 4.1, sampleCount: 17),
             respiratoryRate: MetricBaseline(mean: 14.8, standardDeviation: 0.9, sampleCount: 16),
             sleepHours: MetricBaseline(mean: 7.05, standardDeviation: 0.55, sampleCount: 20),
+            sleepScore: MetricBaseline(mean: 76.0, standardDeviation: 7.0, sampleCount: 20),
             deepSleepPercent: MetricBaseline(mean: 17.0, standardDeviation: 2.2, sampleCount: 14),
             remSleepPercent: MetricBaseline(mean: 19.1, standardDeviation: 2.0, sampleCount: 14),
             awakePercent: MetricBaseline(mean: 9.8, standardDeviation: 2.1, sampleCount: 14),

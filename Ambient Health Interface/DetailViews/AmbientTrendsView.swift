@@ -876,21 +876,37 @@ private struct AmbientSleepQualitySummaryCard: View {
         VStack(alignment: .leading, spacing: 14) {
             AmbientCardHeader(title: "Sleep Quality", symbol: "bed.double.circle.fill", tint: .blue)
 
-            Text("A weekly read on how restorative your sleep looked across the past week.")
+            Text("A weekly read on how restorative your sleep looked across the past week. The score blends duration, sleep stages, and overnight interruptions.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
             if let latest = latestSleepPoint {
+                let meaningfulPoints = points.filter { $0.totalSleepHours > 0.05 }
+                let weeklyAverageScore = meaningfulPoints.isEmpty
+                    ? nil
+                    : meaningfulPoints.map(\.sleepScore).reduce(0, +) / Double(meaningfulPoints.count)
+                let weeklyAverageSleepHours = meaningfulPoints.isEmpty
+                    ? nil
+                    : meaningfulPoints.map(\.totalSleepHours).reduce(0, +) / Double(meaningfulPoints.count)
+
                 VStack(alignment: .leading, spacing: 10) {
-                    AmbientSleepStageMetricPanel(
-                        title: "Latest • \(shortDayLabel(for: latest.date))",
-                        subtitle: "\(String(format: "%.1f", latest.totalSleepHours)) h asleep",
-                        corePercent: displayedCorePercent(for: latest),
-                        deepPercent: latest.deepPercent,
-                        remPercent: latest.remPercent,
-                        awakePercent: latest.awakePercent,
-                        tint: Color(red: 0.64, green: 0.78, blue: 1.0)
-                    )
+                    HStack(alignment: .top, spacing: 10) {
+                        AmbientSleepScoreBadge(
+                            score: latest.sleepScore,
+                            title: "Latest Sleep Score",
+                            subtitle: shortDayLabel(for: latest.date),
+                            detailText: "\(String(format: "%.1f", latest.totalSleepHours)) h asleep"
+                        )
+
+                        if let weeklyAverageScore {
+                            AmbientSleepScoreBadge(
+                                score: weeklyAverageScore,
+                                title: "Week Score",
+                                subtitle: "Past 7 days",
+                                detailText: weeklyAverageSleepHours.map { String(format: "%.1f h avg asleep", $0) }
+                            )
+                        }
+                    }
 
                     let calendar = Calendar.current
                     let weeklyPoints = Array(
@@ -899,16 +915,29 @@ private struct AmbientSleepQualitySummaryCard: View {
                             .suffix(ambientWeeklyVisibleDays)
                     )
 
-                    if !weeklyPoints.isEmpty {
+                    if !weeklyPoints.isEmpty || latest.totalSleepHours > 0.05 {
                         DisclosureGroup(isExpanded: $showsWeeklySleepStages) {
                             VStack(alignment: .leading, spacing: 10) {
                                 AmbientSleepStageLegend()
-                                AmbientSleepQualityWeekList(points: weeklyPoints)
+
+                                if !weeklyPoints.isEmpty {
+                                    AmbientSleepQualityWeekList(points: weeklyPoints)
+                                }
+
+                                AmbientSleepStageMetricPanel(
+                                    title: "Latest Sleep Breakdown",
+                                    subtitle: "\(shortDayLabel(for: latest.date)) • \(String(format: "%.1f", latest.totalSleepHours)) h asleep",
+                                    corePercent: displayedCorePercent(for: latest),
+                                    deepPercent: latest.deepPercent,
+                                    remPercent: latest.remPercent,
+                                    awakePercent: latest.awakePercent,
+                                    tint: Color(red: 0.64, green: 0.78, blue: 1.0)
+                                )
                             }
                                 .padding(.top, 8)
                         } label: {
                             HStack {
-                                Text("Show the rest of the week")
+                                Text("Show sleep details")
                                     .font(.footnote.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
@@ -946,8 +975,91 @@ private struct AmbientSleepStageLegend: View {
     }
 }
 
+private struct AmbientSleepScoreBadge: View {
+    let score: Double
+    let title: String
+    let subtitle: String
+    let detailText: String?
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 10)
+
+                Circle()
+                    .trim(from: 0, to: max(0.02, min(score / 100, 1)))
+                    .stroke(
+                        AngularGradient(
+                            colors: [
+                                Color(red: 0.39, green: 0.73, blue: 1.0),
+                                Color(red: 0.30, green: 0.86, blue: 0.98),
+                                Color(red: 0.50, green: 0.71, blue: 1.0)
+                            ],
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: Color.blue.opacity(0.16), radius: 8, y: 3)
+
+                VStack(spacing: 1) {
+                    Text("\(Int(score.rounded()))")
+                        .font(.system(size: 23, weight: .semibold, design: .rounded))
+
+                    Text("Score")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 92, height: 92)
+
+            Text(sleepScoreClassification(for: score))
+                .font(.footnote.weight(.semibold))
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if let detailText {
+                Text(detailText)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.blue.opacity(0.12), lineWidth: 1)
+        }
+    }
+}
+
 private func trendDayLabel(for date: Date) -> String {
     Calendar.current.isDateInToday(date) ? "Today" : shortDayLabel(for: date)
+}
+
+private func sleepScoreClassification(for score: Double) -> String {
+    switch score {
+    case ..<41:
+        return "Very Low"
+    case ..<61:
+        return "Low"
+    case ..<81:
+        return "OK"
+    case ..<96:
+        return "High"
+    default:
+        return "Very High"
+    }
 }
 
 private struct AmbientSleepLegendChip: View {
@@ -994,7 +1106,14 @@ private struct AmbientSleepStageMetricPanel: View {
                 }
             }
 
-            HStack(spacing: 8) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 8),
+                    GridItem(.flexible(), spacing: 8)
+                ],
+                alignment: .leading,
+                spacing: 8
+            ) {
                 AmbientMiniMetric(title: "Core", value: "\(Int(corePercent.rounded()))%")
                 AmbientMiniMetric(title: "Deep", value: "\(Int(deepPercent.rounded()))%")
                 AmbientMiniMetric(title: "REM", value: "\(Int(remPercent.rounded()))%")
@@ -1027,7 +1146,7 @@ private struct AmbientSleepQualityWeekList: View {
 
                             Spacer()
 
-                            Text("\(String(format: "%.1f", point.totalSleepHours)) h asleep")
+                            Text("Sleep Score \(Int(point.sleepScore.rounded())) • \(String(format: "%.1f", point.totalSleepHours)) h asleep")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
